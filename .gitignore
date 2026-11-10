@@ -218,3 +218,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# OSGuard
+.env
+kb/index/
+kb/raw/*
+!kb/raw/.gitkeep
