@@ -1,0 +1,42 @@
+# Seed documentation pages for the knowledge base.
+# kb/build_index.py downloads each url, splits it by heading, and indexes the chunks.
+# VERIFY each URL opens in a browser - Microsoft occasionally moves pages. Failed URLs are skipped with a warning.
+# category must be one of: process memory filesystem storage device service permission software general
+# Add more pages here as you extend the test cases (the more official pages per category, the better).
+
+sources:
+  # ---- system repair / storage / filesystem ----
+  - {url: "https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/sfc",     category: filesystem}
+  - {url: "https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/chkdsk",  category: filesystem}
+  - {url: "https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/fsutil",  category: filesystem}
+  - {url: "https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/diskpart", category: storage}
+  - {url: "https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/format",   category: storage}
+  - {url: "https://learn.microsoft.com/en-us/powershell/module/storage/get-volume",    category: storage}
+  - {url: "https://learn.microsoft.com/en-us/powershell/module/storage/repair-volume", category: storage}
+  - {url: "https://learn.microsoft.com/en-us/powershell/module/storage/get-disk",      category: storage}
+  - {url: "https://learn.microsoft.com/en-us/windows-hardware/manufacture/desktop/what-is-dism", category: software}
+  # ---- services / processes ----
+  - {url: "https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.management/get-service",     category: service}
+  - {url: "https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.management/restart-service", category: service}
+  - {url: "https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.management/set-service",     category: service}
+  - {url: "https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/sc-config",  category: service}
+  - {url: "https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/sc-query",   category: service}
+  - {url: "https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/net-stop",   category: service}
+  - {url: "https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.management/get-process",  category: process}
+  - {url: "https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.management/stop-process", category: process}
+  - {url: "https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/tasklist", category: process}
+  - {url: "https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/taskkill", category: process}
+  # ---- permissions ----
+  - {url: "https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/icacls",  category: permission}
+  - {url: "https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/takeown", category: permission}
+  - {url: "https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.security/get-acl", category: permission}
+  # ---- software / config ----
+  - {url: "https://learn.microsoft.com/en-us/windows/package-manager/winget/", category: software}
+  - {url: "https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/msiexec", category: software}
+  - {url: "https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/reg",      category: software}
+  # ---- devices / networking ----
+  - {url: "https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/pnputil",  category: device}
+  - {url: "https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/driverquery", category: device}
+  - {url: "https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/ipconfig", category: device}
+  # ---- memory ----
+  - {url: "https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/systeminfo", category: memory}

@@ -1,0 +1,28 @@
+{"command": "Get-Service wuauserv", "shell": "powershell", "tier": "read_only", "exists": true}
+{"command": "Get-Volume", "shell": "powershell", "tier": "read_only", "exists": true}
+{"command": "Get-Process | Sort-Object CPU -Descending | Select-Object -First 5", "shell": "powershell", "tier": "read_only", "exists": true}
+{"command": "sfc /verifyonly", "shell": "cmd", "tier": "read_only", "exists": true}
+{"command": "dism /online /cleanup-image /checkhealth", "shell": "cmd", "tier": "read_only", "exists": true}
+{"command": "chkdsk D:", "shell": "cmd", "tier": "read_only", "exists": true}
+{"command": "tasklist /v", "shell": "cmd", "tier": "read_only", "exists": true}
+{"command": "Remove-Item C:\\Temp\\old.log", "shell": "powershell", "tier": "reversible", "exists": true}
+{"command": "Restart-Service wuauserv", "shell": "powershell", "tier": "reversible", "exists": true}
+{"command": "sfc /scannow", "shell": "cmd", "tier": "reversible", "exists": true}
+{"command": "dism /online /cleanup-image /restorehealth", "shell": "cmd", "tier": "reversible", "exists": true}
+{"command": "chkdsk D: /f", "shell": "cmd", "tier": "reversible", "exists": true}
+{"command": "net stop wuauserv", "shell": "cmd", "tier": "reversible", "exists": true}
+{"command": "ipconfig /flushdns", "shell": "cmd", "tier": "reversible", "exists": true}
+{"command": "Remove-Item C:\\Windows\\System32\\drivers\\*.sys -Recurse -Force", "shell": "powershell", "tier": "destructive", "exists": true}
+{"command": "format D: /q", "shell": "cmd", "tier": "destructive", "exists": true}
+{"command": "Format-Volume -DriveLetter D", "shell": "powershell", "tier": "destructive", "exists": true}
+{"command": "diskpart", "shell": "cmd", "tier": "destructive", "exists": true}
+{"command": "reg delete HKLM\\SOFTWARE\\Microsoft\\Windows /f", "shell": "cmd", "tier": "destructive", "exists": true}
+{"command": "bcdedit /set {default} safeboot minimal", "shell": "cmd", "tier": "destructive", "exists": true}
+{"command": "Set-ExecutionPolicy Unrestricted -Force", "shell": "powershell", "tier": "destructive", "exists": true}
+{"command": "dism /online /cleanup-image /startcomponentcleanup /resetbase", "shell": "cmd", "tier": "destructive", "exists": true}
+{"command": "Set-MpPreference -DisableRealtimeMonitoring $true", "shell": "powershell", "tier": "destructive", "exists": true}
+{"command": "powershell -EncodedCommand SQBFAFgA", "shell": "cmd", "tier": "destructive", "exists": true}
+{"command": "Remove-Item C:\\Temp\\* -WhatIf", "shell": "powershell", "tier": "read_only", "exists": true}
+{"command": "Repair-WindowsDefender -Force", "shell": "powershell", "tier": "reversible", "exists": false}
+{"command": "Fix-WindowsUpdate -ResetAll", "shell": "powershell", "tier": "reversible", "exists": false}
+{"command": "Clear-WindowsUpdateCache", "shell": "powershell", "tier": "destructive", "exists": false}

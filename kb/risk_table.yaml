@@ -1,0 +1,262 @@
+# Risk table used by app/stages/verify/effect.py and environment.py
+#
+# Tiers:  read_only < reversible < destructive
+#   read_only    - only inspects state
+#   reversible   - changes state but can be undone / re-done (restart a service, repair files)
+#   destructive  - data loss, hard to undo, or security/boot-affecting
+#
+# Each command entry:
+#   base:            tier when no rule matches
+#   base_why:        explanation shown when base is above read_only
+#   rules:           list of {when: <regex on the argument string, case-insensitive>, tier, why}
+#                    the HIGHEST matching tier wins
+#   requires_admin:  true if an elevated shell is needed
+#   unavailable_from_build: Windows build number from which the command is not present by default
+#   note:            free-text shown for context
+#
+# Names are lower-case, without ".exe". PowerShell cmdlets not listed here fall back to a
+# verb-based heuristic (Get-* = read_only, Remove-* = destructive, ...) in effect.py.
+
+commands:
+  # ---------------- system repair ----------------
+  sfc:
+    base: read_only
+    requires_admin: true
+    rules:
+      - {when: '/scannow', tier: reversible, why: 'Repairs protected system files'}
+  dism:
+    base: read_only
+    requires_admin: true
+    rules:
+      - {when: '/restorehealth|/revertpendingactions|/startcomponentcleanup|/add-package|/enable-feature|/disable-feature', tier: reversible, why: 'Modifies the component store / Windows features'}
+      - {when: '/resetbase|/remove-package|/remove-capability', tier: destructive, why: 'Removes components; update uninstall may become impossible'}
+  chkdsk:
+    base: read_only
+    requires_admin: true
+    rules:
+      - {when: '/f\b|/r\b|/x\b|/b\b', tier: reversible, why: 'Fixes file system errors; may schedule a reboot-time scan and can alter file system structures'}
+  defrag:
+    base: reversible
+    requires_admin: true
+    rules:
+      - {when: '/a\b', tier: read_only, why: 'Analysis only'}
+  diskpart:
+    base: destructive
+    base_why: 'Disk partitioning tool: clean/format/delete can erase entire disks'
+    requires_admin: true
+  format:
+    base: destructive
+    base_why: 'Erases all data on the target volume'
+    requires_admin: true
+  cleanmgr:
+    base: reversible
+  fsutil:
+    base: read_only
+    requires_admin: true
+    rules:
+      - {when: 'deletejournal|file setzerodata|volume dismount|repair|behavior set', tier: destructive, why: 'Low-level file system modification'}
+      - {when: 'dirty set|resource setautoreset|usn createjournal', tier: reversible, why: 'Changes file system state flags'}
+  vssadmin:
+    base: read_only
+    requires_admin: true
+    rules:
+      - {when: 'delete\s+(shadows|shadowstorage)|resize', tier: destructive, why: 'Deletes restore points / shadow copies'}
+  cipher:
+    base: read_only
+    rules:
+      - {when: '/w', tier: destructive, why: 'Wipes free space on the volume (long-running)'}
+  wsreset:
+    base: reversible
+    note: 'Resets the Microsoft Store cache'
+
+  # ---------------- file operations ----------------
+  remove-item:
+    base: reversible
+    rules:
+      - {when: '-recurse|-force|\s/s\b|\s/f\b', tier: destructive, why: 'Recursive/forced permanent deletion'}
+      - {when: 'system32|c:\\windows|c:\\program files|c:\\\*|^\s*c:\\?\s*$|\\users\\', tier: destructive, why: 'Targets a system or user-data location'}
+  copy-item:  {base: reversible}
+  move-item:  {base: reversible}
+  rename-item: {base: reversible}
+  new-item:   {base: reversible}
+  set-content: {base: reversible, note: "In PowerShell 'sc' is an alias of Set-Content, not sc.exe"}
+  robocopy:
+    base: reversible
+    rules:
+      - {when: '/mir|/purge', tier: destructive, why: 'Mirror/purge deletes files in the destination'}
+  xcopy:      {base: reversible}
+  attrib:     {base: reversible}
+  takeown:
+    base: reversible
+    requires_admin: true
+    rules:
+      - {when: 'c:\\windows|system32|\\program files', tier: destructive, why: 'Taking ownership of OS files weakens system protection'}
+  icacls:
+    base: read_only
+    requires_admin: true
+    rules:
+      - {when: '/grant|/deny|/remove|/setowner|/reset|/inheritance', tier: reversible, why: 'Changes permissions (ACLs)'}
+      - {when: 'everyone:\(?(f|fullcontrol)|c:\\windows|system32|c:\\\s*/', tier: destructive, why: 'Broad or system-wide permission change'}
+  get-acl: {base: read_only}
+  set-acl:
+    base: reversible
+    rules:
+      - {when: 'c:\\windows|system32', tier: destructive, why: 'Changes permissions on OS files'}
+
+  # ---------------- processes / services ----------------
+  taskkill:
+    base: reversible
+    base_why: 'Terminates processes (unsaved data may be lost)'
+    rules:
+      - {when: 'csrss|wininit|winlogon|lsass|services\.exe|smss', tier: destructive, why: 'Killing a critical system process can crash Windows'}
+  stop-process:
+    base: reversible
+    rules:
+      - {when: 'csrss|wininit|winlogon|lsass|services|smss', tier: destructive, why: 'Killing a critical system process can crash Windows'}
+  sc:
+    base: read_only
+    requires_admin: true
+    rules:
+      - {when: '\b(config|start|stop|pause|continue|failure)\b', tier: reversible, why: 'Changes or controls a service'}
+      - {when: '\b(delete|sdset)\b', tier: destructive, why: 'Deletes a service or rewrites its security descriptor'}
+  net:
+    base: read_only
+    rules:
+      - {when: '\b(stop|start|pause|continue)\b', tier: reversible, why: 'Starts/stops a service'}
+      - {when: '\buser\b.*/add|\blocalgroup\b.*/add|\bshare\b.*/delete|\buse\b.*/delete', tier: reversible, why: 'Changes accounts, groups or shares'}
+      - {when: '\buser\b.*/delete', tier: destructive, why: 'Deletes a user account'}
+  start-service:   {base: reversible, requires_admin: true}
+  restart-service: {base: reversible, requires_admin: true}
+  stop-service:    {base: reversible, requires_admin: true}
+  set-service:
+    base: reversible
+    requires_admin: true
+    rules:
+      - {when: 'disabled', tier: destructive, why: 'Disabling a service can break dependent functionality'}
+  schtasks:
+    base: read_only
+    rules:
+      - {when: '/create|/change|/run|/end', tier: reversible, why: 'Changes or runs scheduled tasks'}
+      - {when: '/delete', tier: destructive, why: 'Deletes scheduled tasks'}
+  shutdown:
+    base: reversible
+    base_why: 'Restarts or powers off the machine'
+    rules:
+      - {when: '/a\b', tier: read_only, why: 'Aborts a pending shutdown'}
+  restart-computer: {base: reversible, base_why: 'Restarts the machine'}
+  stop-computer:    {base: reversible, base_why: 'Shuts the machine down'}
+
+  # ---------------- registry / boot / policy ----------------
+  reg:
+    base: read_only
+    requires_admin: true
+    rules:
+      - {when: '\b(add|import|copy|save|restore|load|unload)\b', tier: reversible, why: 'Modifies the registry'}
+      - {when: '\bdelete\b', tier: destructive, why: 'Deletes registry keys/values'}
+  set-itemproperty:    {base: reversible}
+  remove-itemproperty: {base: destructive, base_why: 'Deletes registry values / properties'}
+  bcdedit:
+    base: read_only
+    requires_admin: true
+    rules:
+      - {when: '/set|/delete|/create|/deletevalue|/import|/bootsequence|/default', tier: destructive, why: 'Boot configuration changes can make Windows unbootable'}
+  set-executionpolicy:
+    base: reversible
+    requires_admin: true
+    rules:
+      - {when: 'unrestricted|bypass', tier: destructive, why: 'Weakens script execution protection'}
+  set-mppreference:
+    base: reversible
+    rules:
+      - {when: 'disable\w+\s+\$?true|exclusion', tier: destructive, why: 'Weakens Microsoft Defender protection'}
+  set-netfirewallprofile:
+    base: reversible
+    rules:
+      - {when: 'enabled\s+(false|0)', tier: destructive, why: 'Turns the firewall off'}
+  gpupdate:  {base: reversible}
+  gpresult:  {base: read_only}
+  powercfg:
+    base: read_only
+    rules:
+      - {when: '/h\s+off|/restoredefaultschemes|/delete|/setactive|/change|/hibernate\s+off', tier: reversible, why: 'Changes power configuration'}
+
+  # ---------------- networking ----------------
+  ipconfig:
+    base: read_only
+    rules:
+      - {when: '/release|/renew|/flushdns|/registerdns', tier: reversible, why: 'Resets network configuration state'}
+  netsh:
+    base: read_only
+    rules:
+      - {when: 'winsock reset|int(erface)?\s+ip\s+reset|\bset\b|\badd\b', tier: reversible, why: 'Changes network configuration'}
+      - {when: 'advfirewall\s+reset|advfirewall\s+set\s+\w+\s+state\s+off|\bdelete\b', tier: destructive, why: 'Resets or disables firewall / deletes network config'}
+  ping:       {base: read_only}
+  tracert:    {base: read_only}
+  nslookup:   {base: read_only}
+
+  # ---------------- inspection tools ----------------
+  tasklist:    {base: read_only}
+  systeminfo:  {base: read_only}
+  driverquery: {base: read_only}
+  whoami:      {base: read_only}
+  hostname:    {base: read_only}
+  ver:         {base: read_only}
+  dir:         {base: read_only}
+  type:        {base: read_only}
+  echo:        {base: read_only}
+  findstr:     {base: read_only}
+  find:        {base: read_only}
+  more:        {base: read_only}
+  where:       {base: read_only}
+  eventvwr:    {base: read_only}
+  msinfo32:    {base: read_only}
+  perfmon:     {base: read_only}
+  resmon:      {base: read_only}
+  taskmgr:     {base: read_only}
+  mdsched:     {base: reversible, base_why: 'Schedules a memory test and reboots'}
+  wevtutil:
+    base: read_only
+    requires_admin: true
+    rules:
+      - {when: '\bcl\b|clear-log', tier: destructive, why: 'Clears an event log (destroys diagnostic evidence)'}
+  clear-eventlog: {base: destructive, base_why: 'Clears an event log (destroys diagnostic evidence)'}
+
+  # ---------------- software management ----------------
+  winget:
+    base: read_only
+    rules:
+      - {when: '\b(install|upgrade|import|repair)\b', tier: reversible, why: 'Installs or updates software'}
+      - {when: '\buninstall\b', tier: destructive, why: 'Removes software'}
+  msiexec:
+    base: reversible
+    rules:
+      - {when: '/x\b|/uninstall', tier: destructive, why: 'Uninstalls software'}
+  pnputil:
+    base: read_only
+    requires_admin: true
+    rules:
+      - {when: '/add-driver|/scan-devices|/restart-device|/enable-device|/disable-device', tier: reversible, why: 'Changes driver / device state'}
+      - {when: '/delete-driver|/remove-device', tier: destructive, why: 'Removes drivers or devices'}
+  remove-appxpackage: {base: destructive, base_why: 'Removes an installed app package'}
+  wmic:
+    base: read_only
+    unavailable_from_build: 26100
+    note: 'WMIC is deprecated and removed by default from Windows 11 24H2; prefer Get-CimInstance'
+    rules:
+      - {when: '\bdelete\b|\buninstall\b|\bcall\b', tier: destructive, why: 'WMIC delete/uninstall/call modifies the system'}
+
+  # ---------------- storage cmdlets ----------------
+  format-volume:    {base: destructive, base_why: 'Erases all data on the volume', requires_admin: true}
+  clear-disk:       {base: destructive, base_why: 'Wipes the disk', requires_admin: true}
+  initialize-disk:  {base: destructive, base_why: 'Writes a new partition table', requires_admin: true}
+  remove-partition: {base: destructive, base_why: 'Deletes a partition', requires_admin: true}
+  resize-partition: {base: destructive, base_why: 'Resizing partitions risks data loss', requires_admin: true}
+  repair-volume:
+    base: reversible
+    base_why: 'Repairs file system errors (use -Scan for an online check only)'
+    requires_admin: true
+  repair-windowsimage:
+    base: read_only
+    requires_admin: true
+    rules:
+      - {when: '-restorehealth', tier: reversible, why: 'Repairs the component store'}
