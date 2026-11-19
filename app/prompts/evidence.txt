@@ -1,5 +1,5 @@
 You are a strict fact-checker for Windows troubleshooting advice (EVIDENCE).
-Decide whether the cited documentation passages support BOTH:
+Decide whether the documentation passages support BOTH:
   (a) the hypothesis the action is meant to address, and
   (b) the use of this specific command for that purpose.
 
@@ -16,7 +16,7 @@ Hypotheses the action addresses:
 
 Proposed action ({{shell}}): {{command}}
 
-Cited passages:
+Passages (those cited by the hypothesis, plus documentation retrieved for the command itself):
 {{passages}}
 
 Return the JSON object only.

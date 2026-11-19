@@ -79,3 +79,4 @@ def verify_command(command: str, goal: str, env: Optional[EnvSnapshot] = None,
     chunks = retrieve.retrieve_ranked(command + " " + goal, None, k=TOP_K)
     ev = evidence.check_command_in_docs(command, chunks)
     return _verify(action, goal or "Run this command", env, ev)
+

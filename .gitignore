@@ -224,3 +224,6 @@ __marimo__/
 kb/index/
 kb/raw/*
 !kb/raw/.gitkeep
+
+env.json
+eval/results/

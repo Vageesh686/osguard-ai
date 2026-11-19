@@ -43,4 +43,4 @@ def test_environment_admin_required():
     act = Action(command="sfc /scannow", shell="cmd")
     eff = effect.analyze_command(act.command, "cmd")
     v, reason, _ = environment.check_environment(act, EnvSnapshot(os_build="10.0.22631.1", is_admin=False), eff)
-    assert v == "fail" and "elevated" in reason
+    assert v == "unknown" and "elevated" in reason

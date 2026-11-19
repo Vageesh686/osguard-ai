@@ -11,6 +11,7 @@ from app.schemas import Chunk, Extraction
 
 RRF_K = 60
 POOL = 25
+MAX_PER_PAGE = 2
 BGE_QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
 TOKEN_RE = re.compile(r"0x[0-9a-f]+|[a-z0-9_\-]+")
 
@@ -78,11 +79,21 @@ def retrieve_ranked(query: str, extraction: Optional[Extraction], k: int = TOP_K
     codes = [c.lower() for c in (extraction.error_codes if extraction else [])]
     for cid in list(fused):
         c = s["by_id"][cid]
-        if extraction and c.category in (extraction.category, "general"):
-            fused[cid] *= 1.25
+        if extraction and c.category == extraction.category:
+            fused[cid] *= 1.15            # soft nudge, not a filter: the classifier can be wrong
+        elif c.category == "general":
+            fused[cid] *= 0.85            # broad reference pages should not outrank specific docs
         if codes and any(code in c.text.lower() for code in codes):
             fused[cid] += 0.05                      # exact error-code hit
-    top = sorted(fused, key=fused.get, reverse=True)[:k]
+        top, per_url = [], {}
+    for cid in sorted(fused, key=fused.get, reverse=True):
+        url = s["by_id"][cid].url
+        if per_url.get(url, 0) >= MAX_PER_PAGE:
+            continue
+        per_url[url] = per_url.get(url, 0) + 1
+        top.append(cid)
+        if len(top) == k:
+            break
     return [s["by_id"][cid] for cid in top]
 
 

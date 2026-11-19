@@ -5,22 +5,33 @@ an LLM entailment check then judges whether the cited passages really support th
 """
 from __future__ import annotations
 
+import logging
+
 from app import llm, promptlib
 from app.schemas import Action, Chunk, Diagnosis, EvidenceCheck
-from app.stages.verify.effect import TOKEN_RE, normalize_name
+from app.stages import retrieve
+from app.stages.verify.effect import analyze_command
+
+log = logging.getLogger("osguard.evidence")
 
 PASSAGE_CHARS = 1500
+EXTRA_K = 3
 
-
-def _command_names(command: str) -> list[str]:
-    toks = TOKEN_RE.findall(command.strip())
-    return [normalize_name(toks[0])] if toks else []
+# Generic utility cmdlets: troubleshooting docs never describe them, so their absence from the
+# retrieved passages says nothing about whether the action is grounded.
+GENERIC = {
+    "get-content", "get-childitem", "get-item", "get-itemproperty", "select-string",
+    "select-object", "where-object", "sort-object", "measure-object", "foreach-object",
+    "format-table", "format-list", "out-file", "out-string", "test-path", "get-date",
+    "get-command", "get-help", "write-output", "write-host", "group-object", "echo",
+}
 
 
 def command_in_docs(command: str, chunks: list[Chunk]) -> bool:
-    names = [n for n in _command_names(command) if len(n) > 2]
+    """True if every tool the command depends on is either generic or mentioned in the passages."""
+    names = [n for n in analyze_command(command).commands if len(n) > 2 and n not in GENERIC]
     if not names:
-        return False
+        return True                       # only generic utility cmdlets
     blob = " ".join(c.text.lower() + " " + c.title.lower() for c in chunks)
     return any(n in blob for n in names)
 
@@ -48,18 +59,31 @@ def check_evidence(action: Action, diagnosis: Diagnosis, chunks: list[Chunk]) ->
                              reason="The linked hypothesis cites no retrieved documentation")
 
     cited = [by_id[i] for i in cited_ids]
+
+    # Action-conditioned retrieval: the hypothesis was grounded by the passages it cites, but the
+    # COMMAND may be documented elsewhere in the knowledge base (e.g. the sfc or DISM pages).
+    extra: list[Chunk] = []
+    if action.shell != "gui":
+        try:
+            extra = [c for c in retrieve.retrieve_ranked(f"{action.command} {linked[0].text}", None, k=EXTRA_K)
+                     if c.id not in cited_ids]
+        except Exception as e:                                         # noqa: BLE001
+            log.warning("action-conditioned retrieval failed: %s", e)
+    passages = cited + extra
+    docs_pool = list({c.id: c for c in chunks + extra}.values())
+
     system, user = promptlib.render(
         "evidence",
         claims="\n".join(f"- {h.text}" for h in linked),
         shell=action.shell,
         command=action.command,
-        passages="\n\n".join(f"[{c.id}] {c.title}\n{c.text[:PASSAGE_CHARS]}" for c in cited),
+        passages="\n\n".join(f"[{c.id}] {c.title}\n{c.text[:PASSAGE_CHARS]}" for c in passages),
     )
     result = llm.generate_structured(user, EvidenceCheck, system=system)
 
     # Deterministic downgrade: a "supported" verdict needs the command to appear in the docs we retrieved.
     if (result.verdict == "supported" and action.shell != "gui"
-            and not command_in_docs(action.command, chunks)):
+            and not command_in_docs(action.command, docs_pool)):
         result = EvidenceCheck(
             verdict="weak",
             reason=result.reason + " (Downgraded: command name not found in any retrieved passage.)",

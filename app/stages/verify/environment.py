@@ -70,7 +70,7 @@ def check_environment(action: Action, env: EnvSnapshot,
             unknowns.append(f"'{name}' is not a recognised Windows command")
 
     if effect.requires_admin and env.is_admin is False:
-        fails.append("needs an elevated (administrator) shell but the current shell is not elevated")
+        unknowns.append("needs an elevated (administrator) shell; the current shell is not elevated")
 
     req_results = compat.check_requirements(action.requires, env)
     for r in req_results:

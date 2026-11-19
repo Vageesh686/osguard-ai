@@ -84,6 +84,9 @@ def fetch_sources() -> None:
     RAW_DIR.mkdir(parents=True, exist_ok=True)
     cfg = yaml.safe_load(SOURCES_PATH.read_text(encoding="utf-8"))
     for src in cfg["sources"]:
+        if not isinstance(src, dict) or "url" not in src:
+            print("  [skip] malformed entry in sources.yaml:", src)
+            continue
         url = src["url"]
         try:
             html = fetch(url)
