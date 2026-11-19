@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "osguard-ai"
+version = "0.1.0"
+description = "Evidence-grounded Windows diagnostics and controlled repair assistant"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "langchain-groq>=1.2,<2",
+    "python-dotenv>=1,<2",
+    "streamlit>=1.40,<2",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<9"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-ra -p no:langsmith_plugin"
+markers = [
+    "integration: makes a live request to the configured Groq API",
+]
