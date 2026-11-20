@@ -88,10 +88,11 @@ class SupervisorClassification(StrictModel):
 
 
 class DiagnosticObservation(StrictModel):
-    """A confirmed observation with provenance; never use for an inference."""
+    """A quoted user-reported statement, not an independently confirmed fact."""
 
     description: str
-    source: str
+    source: Literal["user_report", "user_provided_log"]
+    supporting_quote: str
     evidence_ids: list[str] = Field(default_factory=list)
 
 
@@ -100,16 +101,20 @@ class DiagnosticHypothesis(StrictModel):
 
     description: str
     supporting_evidence_ids: list[str] = Field(default_factory=list)
+    supporting_quotes: list[str] = Field(default_factory=list)
     uncertainty: str
 
 
 class CommandVerificationFinding(StrictModel):
     command_text: str
     user_intent: str | None = None
+    intent_match: Literal["matches", "does_not_match", "unclear"] = "unclear"
     recognized_parts: list[str] = Field(default_factory=list)
     unknown_parts: list[str] = Field(default_factory=list)
     risk: Literal["low", "medium", "high", "unknown"] = "unknown"
     potential_effects: list[str] = Field(default_factory=list)
+    requires_admin: Literal["yes", "no", "unknown"] = "unknown"
+    explanation: str = ""
     verified: bool = False
     should_execute: Literal[False] = False
 
@@ -118,7 +123,13 @@ class CompatibilityFinding(StrictModel):
     component: str
     installed_version: str | None = None
     required_version: str | None = None
+    required_os: str | None = None
+    required_architecture: str | None = None
     result: Literal["compatible", "incompatible", "unknown"] = "unknown"
+    fact_status: Literal["user_reported", "hypothesis", "not_established"] = (
+        "not_established"
+    )
+    hypothesis: str | None = None
     evidence_ids: list[str] = Field(default_factory=list)
     missing_information: list[str] = Field(default_factory=list)
 
@@ -178,8 +189,36 @@ class ExecutionValidationResult(StrictModel):
 
 class SpecialistResult(StrictModel):
     specialist: SpecialistName
-    status: Literal["not_implemented", "completed", "failed"]
+    status: Literal["completed", "failed"]
     message: str
+
+
+class DiagnosticAgentOutput(StrictModel):
+    """Structured analysis grounded only in the request and supplied logs."""
+
+    reported_symptoms: list[str] = Field(default_factory=list)
+    potentially_affected_subsystems: list[OSSubsystem] = Field(default_factory=list)
+    observations: list[DiagnosticObservation] = Field(default_factory=list)
+    hypotheses: list[DiagnosticHypothesis] = Field(default_factory=list)
+    missing_information: list[str] = Field(default_factory=list)
+    safe_diagnostic_steps: list[str] = Field(default_factory=list)
+    uncertainty_notes: list[str] = Field(default_factory=list)
+
+
+class CommandVerificationOutput(StrictModel):
+    """Static review result; the command is never executed by OSGuard."""
+
+    findings: list[CommandVerificationFinding] = Field(default_factory=list)
+    missing_information: list[str] = Field(default_factory=list)
+    uncertainty_notes: list[str] = Field(default_factory=list)
+
+
+class CompatibilityAgentOutput(StrictModel):
+    """Compatibility assessment separated into reports and hypotheses."""
+
+    findings: list[CompatibilityFinding] = Field(default_factory=list)
+    missing_information: list[str] = Field(default_factory=list)
+    uncertainty_notes: list[str] = Field(default_factory=list)
 
 
 class WorkflowError(StrictModel):

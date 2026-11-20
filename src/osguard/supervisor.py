@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from osguard.config import GroqSettings, load_settings
 from osguard.groq_client import create_chat_model
+from osguard.privacy import redact_sensitive_text
 from osguard.schemas import (
     OSSubsystem,
     ProblemType,
@@ -70,11 +71,18 @@ def create_supervisor_classifier(
     *,
     settings: GroqSettings | None = None,
     model_factory: Callable[..., Any] | None = None,
+    model: Any | None = None,
 ) -> Classifier:
-    """Create one reusable structured-output classifier backed by ChatGroq."""
-    active_settings = settings or load_settings()
-    model = create_chat_model(active_settings, model_factory=model_factory)
-    structured_model = model.with_structured_output(SupervisorClassification)
+    """Create one reusable structured-output classifier backed by ChatGroq.
+
+    A graph builder may pass its shared model instance to avoid constructing a
+    separate provider client for the supervisor and specialist workflows.
+    """
+    active_model = model
+    if active_model is None:
+        active_settings = settings or load_settings()
+        active_model = create_chat_model(active_settings, model_factory=model_factory)
+    structured_model = active_model.with_structured_output(SupervisorClassification)
     chain = SUPERVISOR_PROMPT | structured_model
 
     def classify(user_request: str) -> SupervisorClassification:
@@ -229,7 +237,9 @@ def create_supervisor_node(classifier: Classifier) -> Callable[[OSGuardState], d
             )
         else:
             try:
-                classification = _coerce_classification(classifier(request.strip()))
+                classification = _coerce_classification(
+                    classifier(redact_sensitive_text(request.strip()))
+                )
             except Exception as exc:
                 return _failed_classification(exc)
             classification = classification.model_copy(

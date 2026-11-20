@@ -1,4 +1,4 @@
-"""Local Streamlit interface for the OSGuard Phase 1 supervisor."""
+"""Local Streamlit interface for the OSGuard Supervisor and specialists."""
 
 import streamlit as st
 
@@ -9,8 +9,8 @@ from osguard.groq_client import GroqProviderUnavailable, GroqRequestError, ask_g
 st.set_page_config(page_title="OSGuard AI")
 st.title("OSGuard AI")
 st.caption(
-    "Describe a Windows issue to classify it and route it to the relevant "
-    "specialist workflow. Phase 1 does not run system checks or repairs."
+    "Describe a Windows issue for structured analysis. OSGuard uses only the "
+    "request and any text you provide; it does not inspect or change your system."
 )
 
 
@@ -61,7 +61,8 @@ def _render_supervisor_result(result):
         else:
             st.caption("The host environment was not inspected.")
 
-    st.write(f"**Workflow status:** {_display_label(result.get('workflow_status', 'unknown'))}")
+    workflow_status = result.get("workflow_status", "unknown")
+    st.write(f"**Workflow status:** {_display_label(workflow_status)}")
 
     missing = result.get("missing_information", [])
     if missing:
@@ -70,15 +71,105 @@ def _render_supervisor_result(result):
     if uncertainties:
         st.caption("Uncertainty: " + "; ".join(uncertainties))
 
-    for specialist_result in result.get("specialist_results", []):
-        st.markdown(f"**{_display_label(specialist_result.specialist)}**")
-        st.info(specialist_result.message)
+    st.subheader("Specialist results")
+    specialist_results = result.get("specialist_results", [])
+    if not specialist_results:
+        st.caption("No specialist analysis was run.")
+    for specialist_result in specialist_results:
+        st.markdown(
+            f"**{_display_label(specialist_result.specialist)} — "
+            f"{_display_label(specialist_result.status)}**"
+        )
+        (st.error if specialist_result.status == "failed" else st.info)(
+            specialist_result.message
+        )
+
+    symptoms = result.get("diagnostic_symptoms", [])
+    diagnostic_subsystems = result.get("diagnostic_subsystems", [])
+    observations = result.get("diagnostic_observations", [])
+    hypotheses = result.get("diagnostic_hypotheses", [])
+    safe_steps = result.get("safe_diagnostic_steps", [])
+    if symptoms or diagnostic_subsystems or observations or hypotheses or safe_steps:
+        with st.expander("Diagnostic analysis", expanded=True):
+            if symptoms:
+                st.markdown("**Symptoms extracted from the request**")
+                for symptom in symptoms:
+                    st.write(f"• {symptom}")
+            if diagnostic_subsystems:
+                st.write(
+                    "**Potentially affected subsystems:** "
+                    + ", ".join(_display_label(item) for item in diagnostic_subsystems)
+                )
+            if observations:
+                st.markdown("**Quoted observations**")
+                for observation in observations:
+                    st.write(observation.description)
+                    st.caption(
+                        f"Source: {_display_label(observation.source)} · "
+                        f'Quote: “{observation.supporting_quote}”'
+                    )
+            if hypotheses:
+                st.markdown("**Hypotheses (unconfirmed)**")
+                for hypothesis in hypotheses:
+                    st.write(hypothesis.description)
+                    st.caption(
+                        f"Why uncertain: {hypothesis.uncertainty} · "
+                        "Evidence is limited to the supplied request."
+                    )
+                    for quote in hypothesis.supporting_quotes:
+                        st.caption(f'User-provided support: “{quote}”')
+            if safe_steps:
+                st.markdown("**Safe information-gathering steps (not performed)**")
+                for step in safe_steps:
+                    st.write(f"• {step}")
+
+    command_findings = result.get("command_verification_findings", [])
+    if command_findings:
+        with st.expander("Command verification", expanded=True):
+            st.caption(
+                "LLM-assisted static review only; OSGuard does not parse through a "
+                "PowerShell runtime or execute submitted commands."
+            )
+            for finding in command_findings:
+                st.code(finding.command_text, language="powershell")
+                st.write(f"**Risk:** {_display_label(finding.risk)}")
+                st.write(f"**Intent match:** {_display_label(finding.intent_match)}")
+                st.write(f"**Administrator requirement:** {_display_label(finding.requires_admin)}")
+                st.write(f"**Recognized parts:** {', '.join(finding.recognized_parts) or 'None'}")
+                if finding.unknown_parts:
+                    st.warning("Unknown parts: " + ", ".join(finding.unknown_parts))
+                if finding.potential_effects:
+                    st.write("**Potential effects:** " + "; ".join(finding.potential_effects))
+                if finding.explanation:
+                    st.write(finding.explanation)
+                if not finding.verified:
+                    st.caption("This command was not verified as safe.")
+
+    compatibility_findings = result.get("compatibility_findings", [])
+    if compatibility_findings:
+        with st.expander("Compatibility analysis", expanded=True):
+            for finding in compatibility_findings:
+                st.markdown(f"**{finding.component} — {_display_label(finding.result)}**")
+                st.caption("Any comparison is based only on values reported in the request.")
+                if finding.installed_version:
+                    st.write(f"**Installed version (user-reported):** {finding.installed_version}")
+                if finding.required_version:
+                    st.write(f"**Required version (user-reported):** {finding.required_version}")
+                if finding.required_os:
+                    st.write(f"**Required OS (user-reported):** {finding.required_os}")
+                if finding.required_architecture:
+                    st.write(f"**Required architecture (user-reported):** {finding.required_architecture}")
+                st.caption(f"Fact status: {_display_label(finding.fact_status)}")
+                if finding.hypothesis:
+                    st.write(f"**Hypothesis:** {finding.hypothesis}")
+                if finding.missing_information:
+                    st.warning("Needed: " + "; ".join(finding.missing_information))
 
     final_response = result.get("final_response")
     if final_response is not None:
         st.write(final_response.message)
         if not final_response.findings_available:
-            st.caption("No diagnostic findings or corrective actions were produced.")
+            st.caption("No verified findings were produced.")
 
     for error in result.get("errors", []):
         st.error(error.message)
@@ -86,11 +177,14 @@ def _render_supervisor_result(result):
 
 user_request = st.text_area(
     "Describe your Windows issue",
-    placeholder="For example: My Windows PC has unusually high CPU usage.",
+    placeholder=(
+        "For example: My Windows PC has unusually high CPU usage, or paste a "
+        "PowerShell command or application error."
+    ),
     height=120,
 )
 
-if st.button("Classify and route", type="primary"):
+if st.button("Analyze and route", type="primary"):
     if not user_request.strip():
         st.warning("Enter a short description of the Windows issue first.")
     else:
@@ -98,7 +192,7 @@ if st.button("Classify and route", type="primary"):
         try:
             from osguard.state import make_initial_state
 
-            with st.spinner("Classifying the request and selecting specialists..."):
+            with st.spinner("Classifying the request and running selected specialists..."):
                 workflow = _get_supervisor_graph()
                 result = workflow.invoke(make_initial_state(user_request))
             st.session_state["osguard_supervisor_result"] = result

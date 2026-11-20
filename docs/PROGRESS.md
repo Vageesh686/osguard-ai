@@ -1,63 +1,83 @@
 # OSGuard AI Progress
 
-## Current milestone: Phase 1 — LangGraph Supervisor
+## Current milestone: Phase 2 — Specialist Agents
 
-**Status:** Implementation is present but was not tested in this turn, as
-requested. The known Windows Application Control restriction on Pydantic Core
-remains unresolved; no policy changes or bypass attempts were made.
+**Status:** Implementation changes are present; tests and runtime execution were
+not performed in this task, as requested. Python remains 3.14. The existing
+Windows Application Control restriction on `pydantic_core` remains deferred.
 
-### Implemented
+### Implemented in code
 
-- Added strict Pydantic contracts for request classification, OS environment,
-  specialist findings, evidence provenance, proposed actions, IEEE results,
-  repair eligibility, approval, execution/validation, errors, and final reports.
-- Added a typed LangGraph shared state with reducer-backed finding/result lists.
-- Added a Groq-backed Supervisor classifier using the existing `ChatGroq`
-  factory and LangChain structured output. One classifier/client is built per
-  cached graph; routing and graph execution support classifier injection.
-- Added bounded conditional routing to the Diagnostic, Command Verification,
-  and Compatibility specialists. Each selected specialist runs at most once;
-  complex requests can select multiple specialists.
-- Added an aggregation node and a final response node. Specialist placeholders
-  return `not_implemented` and empty findings; no Windows checks, PowerShell
-  commands, repairs, or fabricated results are produced.
-- Updated Streamlit with a problem input, classification/category, subsystem,
-  selected specialists, workflow status, missing information, and explicit
-  placeholder status. The existing Groq connection check remains available in
-  a separate expander.
-- Added seven offline tests for high CPU, PowerShell safety, missing software
-  dependency, crash after Windows update, unclear input, unsupported environment
-  claims, and invalid structured output.
-- Updated README examples to describe Phase 1 behavior.
+- Replaced all three placeholder specialists with reusable structured-output
+  LangChain workflows backed by the existing Groq model factory.
+- Changed graph construction to share one `ChatGroq` model instance among the
+  Supervisor and selected specialists. Classifiers, model factories, models,
+  and specialist node functions can be injected.
+- Added prompt-boundary redaction for common Windows paths, account labels,
+  email addresses, SIDs, and labeled IP addresses before user text is sent to
+  Groq. Quote grounding and static command matching use the redacted text.
+- Diagnostic Agent: extracts user-reported symptoms, potential subsystems,
+  quote-grounded observations and hypotheses, missing information, uncertainty,
+  and non-invasive information-gathering steps. It does not inspect the host;
+  unsupported quotes and steps that appear to modify the system are omitted.
+- Command Verification Agent: reviews supplied command text without running
+  it, reports intent fit, recognized and unknown command names, possible
+  effects, risk, and administrator uncertainty. Deterministic static rules flag
+  known mutating commands and preserve unknown commands as unverified. The
+  structured contract prohibits execution.
+- Compatibility Agent: retains version and OS/architecture facts only when
+  present in user input, distinguishes user-reported facts from hypotheses,
+  and leaves the result unknown unless explicit versions and a comparison
+  constraint can be checked.
+- Added append reducers for specialist findings, missing information, and
+  uncertainty. Specialist failures are recorded without dropping completed
+  results from other agents; graph routing remains bounded to one invocation
+  per selected specialist.
+- Updated the final response and Streamlit UI to show agent status, diagnostic
+  quotes and hypotheses, unperformed safe steps, command review, compatibility
+  facts, missing information, uncertainty, and partial failures.
+- Populated `docs/ARCHITECTURE.md` with the frozen architecture and current
+  implementation boundaries. Updated README behavior and examples.
 
 ### Files added or modified
 
-- Added: `src/osguard/schemas.py`, `src/osguard/state.py`,
-  `src/osguard/supervisor.py`, `src/osguard/graph.py`.
-- Added: `src/osguard/agents/__init__.py`, `diagnostic.py`,
-  `command_verify.py`, and `compatibility.py`.
-- Added: `tests/test_supervisor_graph.py`.
-- Modified: `app.py`, `README.md`, and this progress report.
+- Added: `src/osguard/agents/_common.py`.
+- Modified: `src/osguard/agents/diagnostic.py`,
+  `src/osguard/agents/command_verify.py`,
+  `src/osguard/agents/compatibility.py`, `src/osguard/graph.py`,
+  `src/osguard/schemas.py`, `src/osguard/state.py`,
+  `src/osguard/supervisor.py`, and `app.py`.
+- Updated: `README.md`, `docs/ARCHITECTURE.md`, and this report.
 
 ### Tests and live services
 
-- Tests were **not run**, per the user's instruction.
+- Tests were not run, per the user's instruction. No test files were added or
+  updated in this task.
 - No live Groq request was made.
-- Supervisor routing tests use injected classifications; they do not require
-  Groq credentials or make network requests.
+- The existing Phase 1 supervisor tests still assert placeholder-agent results
+  and need to be revised to inject structured specialist responses before the
+  automated suite can validate Phase 2 behavior.
+- No PowerShell command, diagnostic tool, or repair was executed.
 
 ### Known limitations
 
-- Specialist agents are placeholders. No diagnostic observations, hypotheses,
-  command verification, compatibility findings, RAG evidence, IEEE decisions,
-  repairs, approvals, or post-repair validation are implemented in this phase.
-- The Windows Application Control block on `pydantic_core` was previously
-  confirmed and can prevent Pydantic-dependent app imports in this environment.
-  It is intentionally left for the user to resolve later.
-- The new code and UI were not executed during this turn, so runtime behavior
-  remains unverified.
+- Runtime behavior is unverified. The previously observed Windows Application
+  Control policy may still block imports of `pydantic_core`; it was not bypassed
+  or changed.
+- Specialist analysis is based on the request text only. There is no live
+  Windows inspection, PowerShell parser, FAISS retrieval, vendor-document
+  verification, or authoritative software inventory.
+- Privacy redaction covers common patterns only; it cannot guarantee that all
+  sensitive content in arbitrary logs is removed.
+- Command recognition uses a small conservative static name policy, not a
+  complete PowerShell grammar. Unknown or complex syntax remains unverified.
+- Compatibility results remain unknown when explicit, comparable requirements
+  are absent.
+- The mandatory IEEE gate, repair plan, approval mechanism, restricted repair
+  executor, and post-repair validation are not implemented yet.
 
-### Next milestone
+### Next phase
 
-The next planned milestone is the three specialist workflows, beginning with
-approved read-only diagnostics. It was not started as part of this Phase 1 task.
+Phase 3 is not started. Per the implementation guide, the next milestone is
+trusted evidence retrieval and approved read-only Windows tools. The IEEE gate
+and repair workflow remain later milestones.

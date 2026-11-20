@@ -34,10 +34,13 @@ class OSGuardState(TypedDict, total=False):
     classification: SupervisorClassification | None
     problem_type: ProblemType
     os_subsystems: list[OSSubsystem]
+    diagnostic_subsystems: Annotated[list[OSSubsystem], operator.add]
     available_environment: SystemEnvironment
     selected_specialists: list[SpecialistName]
-    missing_information: list[str]
-    uncertainty_notes: list[str]
+    missing_information: Annotated[list[str], operator.add]
+    uncertainty_notes: Annotated[list[str], operator.add]
+    diagnostic_symptoms: Annotated[list[str], operator.add]
+    safe_diagnostic_steps: Annotated[list[str], operator.add]
     diagnostic_observations: Annotated[list[DiagnosticObservation], operator.add]
     diagnostic_hypotheses: Annotated[list[DiagnosticHypothesis], operator.add]
     command_verification_findings: Annotated[
@@ -70,10 +73,13 @@ def make_initial_state(user_request: str) -> OSGuardState:
         "classification": None,
         "problem_type": ProblemType.UNKNOWN,
         "os_subsystems": [],
+        "diagnostic_subsystems": [],
         "available_environment": SystemEnvironment(),
         "selected_specialists": [],
         "missing_information": [],
         "uncertainty_notes": [],
+        "diagnostic_symptoms": [],
+        "safe_diagnostic_steps": [],
         "diagnostic_observations": [],
         "diagnostic_hypotheses": [],
         "command_verification_findings": [],

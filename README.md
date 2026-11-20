@@ -74,7 +74,11 @@ A LangGraph Supervisor coordinates specialized workflows:
 - Command Verification Agent
 - Compatibility Agent
 
-Agents use shared diagnostic context and retrieved evidence.
+Specialists receive the Supervisor classification and shared request context.
+The current Phase 2 specialists analyze user-provided text with structured Groq
+outputs. Common paths and identifiers are redacted before cloud inference;
+redaction is best-effort and not a guarantee for arbitrary logs. Shared FAISS
+evidence retrieval is planned but not yet implemented.
 
 ### OS Diagnostics
 
@@ -88,6 +92,9 @@ The system is designed to investigate:
 - Software dependency issues
 - Configuration and permission errors
 
+Current diagnostic analysis is limited to symptoms and logs pasted by the user;
+it does not report live CPU, memory, disk, service, or event-log measurements.
+
 ### Command Verification
 
 Analyze proposed PowerShell commands for:
@@ -97,10 +104,14 @@ Analyze proposed PowerShell commands for:
 - Operational risk
 - Alignment with user intent
 
+The current verifier uses structured model analysis plus conservative static
+command-name checks. It never invokes PowerShell. Unknown or complex commands
+remain unverified.
+
 ### Retrieval-Augmented Generation
 
-Use FAISS to retrieve relevant information from trusted
-operating system documentation.
+FAISS retrieval from trusted operating system documentation is planned, but is
+not implemented in the current milestone.
 
 Generate explanations that distinguish supporting evidence
 from possible diagnostic hypotheses.
@@ -140,7 +151,7 @@ was resolved.
 
 ## 4. System Architecture
 
-The architecture consists of:
+The target architecture consists of:
 
 1. Streamlit User Interface
 2. LangGraph Supervisor
@@ -153,6 +164,11 @@ The architecture consists of:
 9. Restricted Execution Engine
 10. Post-Repair Validation
 11. Final Report Generator
+
+Currently implemented: Supervisor, typed shared state, three text-analysis
+specialists, multi-specialist routing, result aggregation, and the Streamlit
+results display. RAG, live Windows tools, IEEE verification, approval, repair,
+and post-repair validation remain planned.
 
 For detailed architecture and workflows, see:
 
@@ -234,11 +250,10 @@ checked against Groq's current documentation.
 
 ## 8. Running OSGuard AI
 
-The main Streamlit screen accepts a Windows issue, asks Groq for a structured
-classification, and routes it to one or more specialist placeholders. Phase 1
-does not inspect the host, verify commands, check dependencies, or recommend
-changes. Selected specialists explicitly report that they are not implemented.
-Run it locally:
+The main Streamlit screen accepts a Windows issue, asks Groq for structured
+classification and selected specialist analyses, and displays their findings.
+Specialists use a redacted copy of supplied text: they do not inspect the host,
+execute commands, or perform repairs. Configure `.env` and run it locally:
 
 ```powershell
 .\.venv\Scripts\python.exe -m streamlit run app.py --server.address 127.0.0.1
@@ -254,8 +269,9 @@ For an explicit one-off live provider smoke check:
 .\.venv\Scripts\python.exe test_groq.py
 ```
 
-The Groq connection check is available in a separate expander. The automated
-Supervisor tests inject structured classifications and do not call Groq.
+The Groq connection check is available in a separate expander. No automated
+tests or live Groq calls were run for the current Phase 2 implementation; see
+`docs/PROGRESS.md` for the recorded status.
 
 The application is intended to run locally.
 No deployment is required.
@@ -267,33 +283,39 @@ No deployment is required.
 User:
 "My Windows laptop is running slowly and CPU usage is high."
 
-Phase 1 behavior:
-1. Supervisor classifies the request as performance / process CPU.
-2. Diagnostic Agent is selected and reports `not_implemented`.
-3. OSGuard shows that no measurements or findings are available.
+Current behavior:
+1. Supervisor classifies the request and selects Diagnostic Agent.
+2. Diagnostic Agent extracts quoted symptoms and returns hypotheses clearly
+   marked as unconfirmed.
+3. It may suggest safe information-gathering steps, but does not measure CPU or
+   inspect running processes.
 
 ### Scenario 2: Unsafe PowerShell Command
 
 User:
 "Check whether this command is safe for my intended task."
 
-Phase 1 behavior:
-1. Supervisor selects Command Verification Agent.
-2. The placeholder reports that no command was parsed or executed.
+Current behavior:
+1. Supervisor selects Command Verification Agent when command text is present.
+2. The agent returns a static risk and intent review. Unknown commands remain
+   unverified and no command is executed.
 
 ### Scenario 3: Software Compatibility
 
 User:
 "An application fails because a required dependency is missing."
 
-Phase 1 behavior:
+Current behavior:
 1. Supervisor selects Compatibility Agent.
-2. The placeholder reports that no requirements or environment versions were checked.
+2. The agent distinguishes facts stated by the user from hypotheses and asks
+   for missing versions or documented requirements. It does not inspect
+   installed software or invent versions.
 
 ### Scenario 4: Application crashes after a Windows update
 
-The Supervisor selects both Diagnostic and Compatibility Agents. Both report
-`not_implemented`; OSGuard does not claim a cause or compatibility result.
+The Supervisor selects both Diagnostic and Compatibility Agents. Their
+structured findings are merged into shared state. Missing evidence and agent
+errors are surfaced; an uncertain result is not presented as a confirmed cause.
 
 ### Future scenario: User-Approved Repair
 
@@ -336,7 +358,7 @@ Run:
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-Testing should cover:
+Planned test coverage should include:
 - Agent routing
 - Structured output validation
 - RAG retrieval
@@ -353,8 +375,8 @@ and test results.
 ## 12. Development Roadmap
 
 - [ ] Initialize project structure and Groq integration
-- [ ] Implement Supervisor and shared LangGraph state
-- [ ] Implement three specialist agents
+- [x] Implement Supervisor and shared LangGraph state
+- [x] Implement three specialist agents (text analysis only; runtime unverified)
 - [ ] Add FAISS RAG
 - [ ] Add read-only Windows diagnostic tools
 - [ ] Implement IEEE verification
