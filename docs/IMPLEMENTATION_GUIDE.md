@@ -92,7 +92,7 @@ flowchart TD
 | Concern | Choice | Rationale |
 |---|---|---|
 | UI | Streamlit | Local demo, quick feedback, approval button and diagnostic trace |
-| Language | Python 3.12 | Works on Windows; broad ecosystem |
+| Language | CPython 3.14 (Windows x64) | Required project runtime; use current compatible package releases |
 | Orchestration | LangGraph | StateGraph, conditional routing, checkpoint and human approval interrupt |
 | LLM wrapper | LangChain + a provider integration | Structured outputs, prompt templates, tools; choose **one** API provider |
 | Model | Groq API via `langchain-groq` (configurable model ID) | Keep model selection in environment variables; no embedded secrets |
@@ -575,7 +575,7 @@ Use LangGraph supervisor, Diagnostic Agent, Command Verification Agent, Compatib
 - Use tests with mock OS functions; do not run real repair actions from tests against host OS.
 
 ## Engineering
-- Python 3.12, typed schemas, small modules, pytest tests.
+- CPython 3.14, typed schemas, small modules, pytest tests.
 - Use current official LangGraph/LangChain documentation before choosing package versions/imports.
 - Use Groq (`langchain-groq`) via `GROQ_API_KEY` and configurable `GROQ_MODEL`. Test model availability and structured output/tool calling before integrating specialists.
 - Keep secrets in .env and use .env.example; never commit .env or keys.
@@ -591,12 +591,15 @@ Use Windows PowerShell in VS Code. This example avoids executing an activation s
 ```powershell
 mkdir osguard-ai
 cd osguard-ai
-py -3.12 -m venv .venv
+py -3.14 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
-.\.venv\Scripts\python.exe -m pip install streamlit langgraph langchain langchain-groq pydantic psutil pytest python-dotenv
+.\.venv\Scripts\python.exe -m pip install -e ".[test]"
 ```
 
-**Dependencies to add after Codex confirms current package support:** `langchain-groq`, an embeddings package, FAISS integration, a document loading package, and an optional tracing client. Keep the existing LangGraph architecture unchanged. Groq provides chat inference; use an independent local embedding model for FAISS. Have Codex resolve/pin versions rather than relying on unverified import paths.
+The supported Python version is CPython 3.14. Runtime dependencies and their
+Python-compatible version ranges are declared in `pyproject.toml`. Keep the
+existing LangGraph architecture unchanged. Groq provides chat inference; use
+an independent local embedding model for FAISS.
 
 Example `.env.example`:
 
@@ -604,7 +607,7 @@ Example `.env.example`:
 # Select ONE provider; never commit a real key
 LLM_PROVIDER=groq
 GROQ_API_KEY=
-GROQ_MODEL=llama-3.3-70b-versatile
+GROQ_MODEL=openai/gpt-oss-120b
 OSGUARD_DIAGNOSTICS_MODE=fixtures
 OSGUARD_ALLOW_REPAIRS=false
 OSGUARD_BIND_ADDRESS=127.0.0.1
@@ -653,7 +656,7 @@ An `.exe` installer is unnecessary; use Python + Streamlit locally. Don't disabl
 ```text
 Read OSGuard_AI_Codex_Implementation_Guide.md in full.
 This is the authoritative project scope. Do NOT redesign the architecture.
-We are building a local Windows 11 college-project MVP using Python 3.12,
+We are building a local Windows 11 college-project MVP using Python 3.14,
 LangGraph, LangChain, FAISS, Streamlit, and strict Pydantic schemas.
 
 First inspect the repository and current environment. Consult current official

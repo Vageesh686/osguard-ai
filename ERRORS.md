@@ -12,8 +12,8 @@ Application Control blocks that file.
 - Result: the live `ChatGroq` client cannot be loaded in this environment.
 
 This is an environment policy failure, not an error in the Groq request code.
-Do not retry the blocked native import or attempt to bypass the policy. Use an
-administrator-approved Python environment or package when available.
+Do not bypass or change the host policy. Leave this blocker documented until
+the user resolves it through the device's approved process.
 
 ## Pytest plugin import
 
@@ -24,14 +24,28 @@ configured not to auto-load that plugin. The normal project test command then
 ran successfully. This does not change Windows policy or enable the live Groq
 import.
 
-The existing `.venv` uses Python 3.14, while this project currently targets
-Python 3.12. The current mocked tests pass under the existing interpreter, but
-a clean install on the declared target interpreter has not been verified.
+The project and existing `.venv` both target CPython 3.14. The venv reports
+Python 3.14.8 (64-bit Windows). Dependency installation and the mocked test
+suite completed under that interpreter.
+
+## Compatibility check results
+
+- Installed compatible package versions: LangGraph 1.2.23, LangChain 1.5.2,
+  `langchain-groq` 1.2.1, Pydantic 2.14.4 / Pydantic Core 2.50.5, Streamlit
+  1.67.0, FAISS CPU 1.16.0, and Sentence Transformers 6.3.0.
+- `langgraph` and Streamlit imports succeeded. `pip check` reported no broken
+  requirements; the automated tests passed (14 tests).
+- `pydantic_core` and `langchain_groq` remain unimportable due to the confirmed
+  Application Control block. Installing compatible Python 3.14 wheels did not
+  remove this host policy restriction.
+- A post-install import sweep for FAISS and Sentence Transformers was stopped
+  before it completed. Their installed versions and dependency metadata are
+  compatible with this interpreter, but successful imports were not verified.
 
 ## Verification deferred
 
 - Automated tests use a fake model factory and do not import `langchain_groq`.
 - A live Groq request has not been run from this environment because the
   provider import is blocked before the request can start.
-- After an approved environment is available, run the manual smoke check
-  (`python test_groq.py`) to verify the live provider path.
+- After the device policy permits the native dependency to load, run the manual
+  smoke check (`python test_groq.py`) to verify the live provider path.

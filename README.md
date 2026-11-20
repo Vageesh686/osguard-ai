@@ -163,7 +163,7 @@ For detailed architecture and workflows, see:
 
 | Component | Technology |
 |---|---|
-| Language | Python 3.12 |
+| Language | Python 3.14 |
 | Frontend | Streamlit |
 | Agent Orchestration | LangGraph |
 | LLM Integration | LangChain + Groq |
@@ -180,7 +180,7 @@ For detailed architecture and workflows, see:
 ### Prerequisites
 
 - Windows 11
-- Python 3.12
+- CPython 3.14 (Windows x64)
 - Git
 - VS Code
 - Groq API key
@@ -199,7 +199,7 @@ Or open the existing project directory in VS Code.
 ### Create a Virtual Environment
 
 ```powershell
-py -3.12 -m venv .venv
+py -3.14 -m venv .venv
 ```
 
 ### Install Dependencies
@@ -210,7 +210,8 @@ Install the project and its test dependencies from `pyproject.toml`:
 .\.venv\Scripts\python.exe -m pip install -e ".[test]"
 ```
 
-Dependencies for later milestones will be added to `pyproject.toml`.
+The project dependency set includes LangGraph, LangChain, `langchain-groq`,
+Pydantic, FAISS CPU, Sentence Transformers, Streamlit, and dotenv support.
 
 ## 7. Environment Configuration
 
@@ -233,8 +234,11 @@ checked against Groq's current documentation.
 
 ## 8. Running OSGuard AI
 
-The current Streamlit screen checks the configured Groq connection only. It
-does not diagnose Windows problems or recommend system changes. Run it locally:
+The main Streamlit screen accepts a Windows issue, asks Groq for a structured
+classification, and routes it to one or more specialist placeholders. Phase 1
+does not inspect the host, verify commands, check dependencies, or recommend
+changes. Selected specialists explicitly report that they are not implemented.
+Run it locally:
 
 ```powershell
 .\.venv\Scripts\python.exe -m streamlit run app.py --server.address 127.0.0.1
@@ -250,7 +254,8 @@ For an explicit one-off live provider smoke check:
 .\.venv\Scripts\python.exe test_groq.py
 ```
 
-The automated pytest suite uses mocked model responses and does not call Groq.
+The Groq connection check is available in a separate expander. The automated
+Supervisor tests inject structured classifications and do not call Groq.
 
 The application is intended to run locally.
 No deployment is required.
@@ -262,36 +267,35 @@ No deployment is required.
 User:
 "My Windows laptop is running slowly and CPU usage is high."
 
-Expected workflow:
-1. Supervisor routes the request.
-2. Diagnostic Agent investigates process statistics.
-3. RAG retrieves supporting documentation.
-4. IEEE verification checks recommendations.
-5. OSGuard presents findings and next steps.
+Phase 1 behavior:
+1. Supervisor classifies the request as performance / process CPU.
+2. Diagnostic Agent is selected and reports `not_implemented`.
+3. OSGuard shows that no measurements or findings are available.
 
 ### Scenario 2: Unsafe PowerShell Command
 
 User:
 "Check whether this command is safe for my intended task."
 
-Expected workflow:
-1. Command Verification Agent analyzes the command.
-2. The system checks intended effects and risks.
-3. Unsupported or unsafe execution is blocked.
-4. The user receives an explanation.
+Phase 1 behavior:
+1. Supervisor selects Command Verification Agent.
+2. The placeholder reports that no command was parsed or executed.
 
 ### Scenario 3: Software Compatibility
 
 User:
 "An application fails because a required dependency is missing."
 
-Expected workflow:
-1. Compatibility Agent examines requirements.
-2. Available system and package details are checked.
-3. RAG retrieves supporting documentation.
-4. The system recommends verified next steps.
+Phase 1 behavior:
+1. Supervisor selects Compatibility Agent.
+2. The placeholder reports that no requirements or environment versions were checked.
 
-### Scenario 4: User-Approved Repair
+### Scenario 4: Application crashes after a Windows update
+
+The Supervisor selects both Diagnostic and Compatibility Agents. Both report
+`not_implemented`; OSGuard does not claim a cause or compatibility result.
+
+### Future scenario: User-Approved Repair
 
 User:
 "Can OSGuard fix this supported application-level issue?"

@@ -37,7 +37,7 @@ silently changing the architecture.
 
 ## 3. Technology Stack
 
-- Language: Python 3.12
+- Language: Python 3.14
 - LLM Provider: Groq API
 - LLM Integration: langchain-groq
 - Agent Orchestration: LangGraph

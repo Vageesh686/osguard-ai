@@ -7,15 +7,20 @@ name = "osguard-ai"
 version = "0.1.0"
 description = "Evidence-grounded Windows diagnostics and controlled repair assistant"
 readme = "README.md"
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.14,<3.15"
 dependencies = [
+    "faiss-cpu>=1.16,<2",
+    "langchain>=1.5,<2",
     "langchain-groq>=1.2,<2",
+    "langgraph>=1.2,<2",
+    "pydantic>=2.14,<3",
     "python-dotenv>=1,<2",
-    "streamlit>=1.40,<2",
+    "sentence-transformers>=6.3,<7",
+    "streamlit>=1.67,<2",
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=8,<9"]
+test = ["pytest>=9,<10"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
