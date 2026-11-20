@@ -131,6 +131,14 @@ def _ground_finding(
         missing.append("The installed application/runtime version, if known.")
     if not required:
         missing.append("The exact documented dependency or version requirement and its source.")
+    if not required_os:
+        missing.append(
+            "The user's Windows version/build and any documented Windows requirement."
+        )
+    if not required_architecture:
+        missing.append(
+            "The user's system architecture and any documented architecture requirement."
+        )
     result = _compare_explicit_versions(installed, required, request)
     evidence_ids = []
     for value in (installed, required, required_os, required_architecture):
