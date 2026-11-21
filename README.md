@@ -146,29 +146,38 @@ What changes will the action make?
 Every proposed recommendation receives all four structured checks. The Groq
 assessment is combined with deterministic source, intent, environment, target,
 operation, and risk rules. A missing or mismatched fact remains unknown or
-fails; a model risk label cannot override policy. Current proposals are limited
-to documented dependency mismatches with a user-reported installed version.
+fails; a model risk label cannot override policy. Current proposals cover
+documented dependency mismatches with a user-reported installed version and
+the explicitly requested OSGuard disposable demo-cache action. Only the latter
+can become eligible for execution.
 `supported`, `unsupported`, and `uncertain` describe recommendation evidence
 only. High-risk, privileged, unknown, registry, deletion, driver, service,
 security, permission, and command operations are never authorized for
-execution. Phase 4 has no approval buttons or repair executor.
+execution. The IEEE gate precedes every repair eligibility decision.
 
-### Controlled Repair Execution (planned; not available in Phase 4)
+### Controlled Repair Execution
 
-Selected low-risk operations may be performed only after:
+The sole registered operation, `CLEAR_OSGUARD_DEMO_CACHE`, truncates a known
+disposable payload in `data/demo_app/cache`. The user must first prepare this
+fixture explicitly. The action can run only after:
 - Independent verification
 - Eligibility checks
-- Explicit user approval
-- Target and parameter validation
+- Exact plan preview and explicit approval through a checkpointed LangGraph
+  interrupt/resume session
+- Target, parameter, fingerprint, and current file-state validation
+
+The restricted executor rechecks eligibility after approval and records each
+plan as attempted before the file change, so repeated submissions cannot run
+the same plan twice. It does not execute shell or PowerShell commands.
 
 Administrator-level, dangerous, or uncertain actions
 remain recommendation-only.
 
 ### Post-Repair Validation
 
-After an approved repair, OSGuard checks whether the action
-completed successfully and whether the original issue
-was resolved.
+After the approved demo repair, OSGuard freshly inspects the actual cache
+payload and ownership marker. It reports resolved, partially resolved,
+unresolved, failed, or unverifiable according to the measured result.
 
 ## 4. System Architecture
 
@@ -189,9 +198,9 @@ The target architecture consists of:
 Currently implemented: Supervisor, typed shared state, three specialist
 workflows, multi-specialist routing, shared FAISS retrieval, bounded read-only
 Windows tools, result aggregation, corrective recommendation proposals,
-mandatory IEEE verification, and the Streamlit evidence display. Repair
-eligibility, approval, repair execution, and post-repair validation remain
-planned.
+mandatory IEEE verification, exact demo repair planning and eligibility,
+checkpointed approval, one restricted executor, post-repair validation, and
+the Streamlit evidence display. Other repair operations remain unsupported.
 
 For detailed architecture and workflows, see:
 
@@ -275,10 +284,12 @@ checked against Groq's current documentation.
 ## 8. Running OSGuard AI
 
 The main Streamlit screen accepts a Windows issue, asks Groq for structured
-classification and selected specialist analyses, and displays real read-only
-measurements and retrieved documentation where available. It never executes
-submitted commands or performs repairs. Configure `.env` and build the local
-documentation index once:
+classification and selected specialist analyses, and displays read-only
+measurements and retrieved documentation where available. The exact request
+`Clear the OSGuard demo cache.` uses a fixed local route without a Groq call.
+After explicit fixture preparation and exact-plan approval, it can clear only
+that disposable cache. Submitted commands are never executed. Configure `.env`
+and build the local documentation index once:
 
 ```powershell
 .\.venv\Scripts\python.exe -m osguard.rag.build_index
@@ -354,18 +365,20 @@ retrieved documentation, basic Windows metadata, and relevant read-only
 measurements across both agents. Missing evidence and agent errors are surfaced;
 an uncertain result is not presented as a confirmed cause.
 
-### Future scenario: User-Approved Repair
+### Scenario 5: User-Approved Demo Repair
 
 User:
-"Can OSGuard fix this supported application-level issue?"
+"Clear the OSGuard demo cache."
 
-Expected workflow:
-1. The diagnostic workflow identifies a possible fix.
-2. IEEE verification evaluates the action.
-3. The execution policy checks eligibility.
-4. The user approves the specific action.
-5. The restricted executor performs the operation.
-6. The system validates and reports the result.
+Current workflow:
+1. In Streamlit, select **Prepare disposable demo cache** to create known
+   application-owned fixture data.
+2. Submit the exact request above. The read-only inspection supplies evidence.
+3. IEEE verification and eligibility checks produce an exact plan preview.
+4. **APPROVE** or **DECLINE** the plan. Approval resumes the same LangGraph
+   thread and rechecks its fingerprint and current preconditions.
+5. The restricted handler clears the known payload once; fresh inspection
+   determines the reported outcome.
 
 Only predefined, low-risk, non-admin operations
 are eligible for execution.
@@ -398,13 +411,14 @@ Run the automated suite:
 The automated suite covers mocked Supervisor/specialist routing, evidence
 aggregation, retrieval ingestion and search, Windows-tool result handling,
 action proposals, all four IEEE checks, fail-closed policies, graph integration,
-and Streamlit success/failure displays. It uses deterministic fixtures; it
-does not validate native FAISS loading, fetch the live documentation corpus,
-inspect this host, or call Groq. The environment-specific results are in
-`docs/PROGRESS.md`.
-
-Repair eligibility, user approval, repair execution, and post-repair validation
-are not implemented yet and need their own tests in later milestones.
+Streamlit success/failure displays, and Phase 5 approval and execution. Phase 5
+tests use isolated disposable cache fixtures and execute the one registered
+Python handler inside pytest temporary directories. They exercise LangGraph
+interrupt/resume, rejection paths, repeat-submission protection, and fresh
+post-repair measurement. Other tests use deterministic models and tools; no
+test calls Groq, runs PowerShell, or repairs Windows. Native FAISS loading,
+the live documentation corpus, host inspection, and browser-based Streamlit
+interaction remain unverified. Exact results are in `docs/PROGRESS.md`.
 
 See docs/PROGRESS.md for actual implementation status
 and test results.
@@ -417,8 +431,8 @@ and test results.
 - [x] Add FAISS RAG and curated Microsoft documentation
 - [x] Add bounded read-only Windows diagnostic tools
 - [x] Implement corrective action proposals and IEEE verification
-- [ ] Add controlled repair execution
-- [ ] Implement post-repair validation
+- [x] Add controlled execution for the disposable OSGuard demo cache only
+- [x] Implement post-repair validation for that action
 - [x] Add mocked Phase 3 and Phase 4 integration coverage
 - [ ] Verify native FAISS indexing and live Windows/Groq workflow
 - [ ] Prepare final demonstration
@@ -441,7 +455,10 @@ The current Windows environment blocks FAISS's native `_swigfaiss` module
 under Application Control. The automated suite uses a deterministic FAISS test
 double, so native index construction and retrieval still need verification
 after that environment restriction is resolved. No security policy was
-bypassed.
+bypassed. Live Groq, browser-based Streamlit interaction, and operation of the
+demo repair outside isolated pytest fixtures still require manual Windows
+verification. The local checkpoint and execution ledger are process-memory
+only; restarting the app does not preserve a pending approval session.
 
 ## 14. Project Documentation
 

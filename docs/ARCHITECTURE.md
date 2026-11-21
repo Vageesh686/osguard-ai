@@ -3,8 +3,9 @@
 OSGuard preserves the Supervisor, three specialist workflows, shared typed
 state, verification gate, and controlled repair path. Phase 3 adds one shared
 evidence collection node between classification and specialist routing. Phase 4
-adds corrective-action proposals and the mandatory IEEE gate. Approval,
-execution, and post-repair validation remain planned.
+adds corrective-action proposals and the mandatory IEEE gate. Phase 5 adds
+exact demo-cache repair planning, checkpointed approval, restricted execution,
+and post-repair validation.
 
 ## Workflow
 
@@ -25,10 +26,14 @@ flowchart TD
     X --> A[Aggregate findings and errors]
     A --> P[Propose corrective actions]
     P --> I[Mandatory IEEE verification]
-    I --> F[Final response]
+    I --> P5[Repair eligibility and exact plan]
+    P5 -->|ineligible| F[Final response]
+    P5 -->|eligible| AP[Approval interrupt and resume]
+    AP -->|declined or expired| F
+    AP -->|approved exact plan| EX[Restricted demo-cache executor]
+    EX --> V[Fresh post-repair validation]
+    V --> F
     F --> UI[Structured Streamlit evidence display]
-    I -.-> AP[Approval and restricted repair - Phase 5]
-    AP -.-> V[Post-repair validation - planned]
 ```
 
 The Supervisor returns a Pydantic classification with intent, problem category,
@@ -68,8 +73,9 @@ The state carries:
 - Structured retrieval status, attributed passages, and bounded tool results.
 - Missing information, uncertainty, workflow errors, and specialist status.
 - Corrective recommendation candidates, one IEEE result per action ID, and
-  explicit no-action/error summaries. Repair eligibility remains
-  `not_evaluated`; approval, execution, and validation are reserved for later.
+  explicit no-action/error summaries. The one eligible disposable demo-cache
+  action also carries an exact repair plan, approval state, execution result,
+  and fresh post-repair validation result.
 
 Tool observations are accepted only when their quoted value appears in a
 successful matching tool result. Hypothesis citations are retained only when
@@ -171,8 +177,10 @@ Effect assessments. Deterministic checks then control the final result:
   passage must contain the required version. An existing but unrelated source
   does not support the recommendation.
 - **Effect:** an immutable operation policy supplies risk and known effects.
-  The only currently supported proposal operation is a dependency install or
-  update recommendation, classified high risk and recommendation-only.
+  Proposal operations include a dependency install/update recommendation,
+  classified high risk and recommendation-only, and the fixed OSGuard
+  disposable demo-cache clear operation, which is eligible only after all
+  execution gates pass.
   Registry, file deletion, security, driver, service, permission, command, and
   unknown operations fail closed. Model-provided risk labels do not override
   this policy.
@@ -181,8 +189,8 @@ Overall is `supported` only when all four final checks pass, `unsupported` if
 any check fails, and otherwise `uncertain`. A stable content-derived action ID
 maps to exactly one result; reducer merges deduplicate by that ID. A supported
 result means evidence-backed as a recommendation, not safe to execute or
-authorized. Phase 4 does not calculate repair eligibility, request approval,
-execute actions, or modify Windows.
+authorized. Phase 5 independently calculates repair eligibility; a supported
+IEEE recommendation alone cannot authorize execution.
 
 ## Failure, uncertainty, and deferred components
 
@@ -191,12 +199,8 @@ Missing indexes and denied tools do not create evidence. Specialist errors are
 represented as `WorkflowError` and failed `SpecialistResult` records; other
 selected specialists can still complete and their findings are retained.
 
-Phase 4 does not execute commands or modify Windows. The following architecture
-components remain future work:
-
-1. Repair planning, exact per-action user approval, and a restricted executor.
-2. Post-repair validation and evidence-backed reporting.
-
-These components must be added in implementation-guide order without changing
-the Supervisor or specialist architecture. See `docs/IMPLEMENTATION_GUIDE.md`
-and `docs/PROGRESS.md` for status.
+Phase 5 does not execute commands or modify Windows system settings. Only the
+OSGuard-owned disposable demo-cache payload can be changed, after exact-plan
+approval. The checkpoint and once-per-plan execution ledger are process-local;
+other actions remain recommendation-only. See `docs/IMPLEMENTATION_GUIDE.md`
+and `docs/PROGRESS.md` for requirements and verification status.

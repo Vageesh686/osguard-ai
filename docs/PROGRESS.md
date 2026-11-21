@@ -1,6 +1,96 @@
 # OSGuard AI Progress
 
-## Current milestone: Phase 4 — IEEE verification framework
+## Current milestone: Phase 5 — controlled demo repair review and verification
+
+**Status:** The existing Phase 5 implementation passed focused and full
+automated verification on `.venv` CPython 3.14.8. This review found no
+implementation defect requiring a code change. Phase 6 was not started.
+
+### Implemented and reviewed
+
+- LangGraph routes every proposed action through the IEEE node, deterministic
+  eligibility, and exact repair planning. Only the registered
+  `CLEAR_OSGUARD_DEMO_CACHE` action can reach the restricted executor.
+- A checkpointed `interrupt()` pauses for a separate human decision. Resume
+  requires the same thread, an affirmative decision, and the exact plan ID and
+  SHA-256 fingerprint. The action, IEEE result, target, parameters, and current
+  cache precondition are checked again after approval and before execution.
+- The single handler truncates only the known OSGuard-owned disposable cache
+  payload under `data/demo_app/cache`. It rejects unknown entries, altered
+  fixture bytes, arbitrary targets, and detected symlinks/junctions/reparse
+  points. No shell, PowerShell, privileged Windows repair, or arbitrary path
+  execution is present in the repair registry.
+- A process-local execution ledger claims a plan before the file change, so
+  repeat submissions do not execute it twice. Fresh post-repair inspection
+  checks the actual payload and ownership marker before reporting resolved,
+  partially resolved, unresolved, failed, or unverifiable.
+- Streamlit presents the exact plan and separate `APPROVE`/`DECLINE` controls
+  only for an eligible pending checkpoint. It clears its resume cursor before
+  submitting a decision. The demo fixture requires an explicit preparation
+  action in the UI.
+
+### Exact test results
+
+- `.\.venv\Scripts\python.exe --version`: **Python 3.14.8**.
+- `python -m pytest tests/test_phase5_repair.py -q --disable-warnings
+  --log-disable=langgraph.checkpoint.serde.jsonplus`: **36 passed, 1 skipped,
+  17 warnings** in 10.62 seconds.
+- `python -m pytest tests/test_app_ui.py -q --disable-warnings
+  --log-disable=langgraph.checkpoint.serde.jsonplus`: **7 passed, 17 warnings**
+  in 3.38 seconds. This includes the two Phase 5 UI tests.
+- One final full-suite run, `python -m pytest -q --disable-warnings
+  --log-disable=langgraph.checkpoint.serde.jsonplus`: **139 passed, 1 skipped,
+  17 warnings** in 12.57 seconds. The suite was run once after the focused
+  review; no failures occurred.
+- The single skip was the actual directory-symlink creation test on this
+  Windows account: `WinError 1314` (required symlink privilege unavailable).
+  Separate mocked junction and symlink guard tests passed. The 17 warnings
+  are existing `langsmith` deprecation warnings; warning/log output was
+  suppressed in the command but counted by pytest.
+
+### What the tests establish
+
+The isolated `tmp_path` fixture exercised real LangGraph interrupt/resume and
+the registered Python handler, with an unrelated sibling file checked intact.
+Tests covered missing or failed IEEE results, no approval, decline, stale or
+changed plan approval, unregistered actions, modified parameters and arbitrary
+paths, duplicate direct execution and graph resume, changed cache evidence,
+permission failure, malformed agent output, partial specialist failure, and
+fresh validation that refuses to claim success when the payload remains. The
+default exact demo request was exercised without a Groq call or FAISS lookup.
+Streamlit tests used a fake UI and graph; they verified the pending-plan controls
+and one-time resume cursor, not a browser session.
+
+### Limitations and manual Windows checks
+
+- Native FAISS loading remains blocked by the previously observed Windows
+  Application Control policy for `_swigfaiss`; no policy bypass was attempted.
+  The full suite uses a FAISS test double where needed. This blocker is
+  independent of the exact local demo-cache route.
+- A real directory symlink guard needs a Windows account permitted to create
+  that symlink. The guard's junction and payload-symlink branches passed with
+  isolated mocked filesystem responses.
+- No live Groq request, browser-based Streamlit approval session, live FAISS
+  retrieval, host diagnostic sampling, or demo repair outside pytest temporary
+  fixtures was performed during this review. Those need manual Windows checks
+  before claiming a complete live demonstration.
+- `InMemorySaver` and the execution ledger are process-local. Restarting the
+  app loses a pending approval session; no persistent or multi-process
+  execution guarantee is claimed. Only the OSGuard disposable demo cache is
+  repairable. Other recommendations remain recommendation-only.
+
+### Files modified in this review
+
+- `README.md`, `docs/ARCHITECTURE.md`, and `docs/PROGRESS.md` were updated to
+  describe the verified Phase 5 behavior and limitations. No implementation or
+  test code was changed.
+
+### Next phase
+
+Phase 5 is ready for a manual Windows demonstration of the disposable fixture
+once the remaining environment restrictions are handled. Phase 6 has not begun.
+
+## Historical report: Phase 4 — IEEE verification framework
 
 **Status:** Phase 4 implementation is complete. The focused Phase 4 tests
 passed: **39 passed, 17 warnings** in 13.63 seconds. The final full-suite run
