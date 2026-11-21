@@ -50,6 +50,9 @@ all sensitive information in arbitrary logs.
 
 The graph creates one configured `ChatGroq` model and reuses it for the
 Supervisor, specialists, candidate proposal, and IEEE structured assessment.
+Its Pydantic outputs use Groq JSON Schema mode with best-effort schema
+enforcement; application-side Pydantic validation and deterministic safety
+rules still govern accepted findings and actions.
 The evidence collector runs once after classification, performs at most one
 FAISS lookup, and invokes only the relevant fixed read-only tools. It does not
 expose a generic tool-calling loop. Classifier, model, retrieval function,
@@ -151,11 +154,13 @@ inventoried.
 ## Corrective action proposals and IEEE verification
 
 After specialist aggregation, every graph path enters the action proposal node
-and then the IEEE verifier before the final response. The proposer runs only
-when the user asks for remediation and a compatibility finding reports a
-user-reported installed version that conflicts with a retrieved documented
-requirement. It asks the shared Groq model for up to five structured
-candidates. The proposal node reconstructs allowed dependency targets,
+and then the IEEE verifier before the final response. For dependency
+recommendations, the proposer runs only when the user asks for remediation and
+a compatibility finding reports a user-reported installed version that
+conflicts with a retrieved documented requirement. It asks the shared Groq
+model for up to five structured candidates. The exact OSGuard demo-cache request
+uses a separate deterministic candidate from its dedicated read-only inspection.
+The proposal node reconstructs allowed dependency targets,
 versions, rationale, evidence excerpts, effects, risks, and risk level from the
 validated compatibility finding and retrieved source. A user-submitted
 PowerShell command is never promoted into an action. With missing evidence,
@@ -204,3 +209,20 @@ OSGuard-owned disposable demo-cache payload can be changed, after exact-plan
 approval. The checkpoint and once-per-plan execution ledger are process-local;
 other actions remain recommendation-only. See `docs/IMPLEMENTATION_GUIDE.md`
 and `docs/PROGRESS.md` for requirements and verification status.
+
+## Phase 6 runtime boundary
+
+Live Groq text, Supervisor classification, and one workflow through each of the
+three specialists have been checked on Windows 11. The local Sentence
+Transformers model produced embeddings offline. Six read-only Windows tool
+paths returned valid statuses; the event-log path parsed three recent records.
+Streamlit started and its health endpoint responded, and its script ran under
+Streamlit's headless AppTest without exceptions. Browser interaction remains a
+manual check.
+
+Native FAISS loading is blocked by Windows Application Control on this host,
+so the existing FAISS indexer and live retrieval have not been verified. The
+graph preserves an explicit unavailable/missing retrieval status and does not
+replace FAISS with another backend. Offline tests cover routing, provenance,
+IEEE, approval, restricted fixture repair, and validation; they do not prove
+live indexed retrieval or broad Windows repair capability.

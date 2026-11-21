@@ -416,25 +416,27 @@ tests use isolated disposable cache fixtures and execute the one registered
 Python handler inside pytest temporary directories. They exercise LangGraph
 interrupt/resume, rejection paths, repeat-submission protection, and fresh
 post-repair measurement. Other tests use deterministic models and tools; no
-test calls Groq, runs PowerShell, or repairs Windows. Native FAISS loading,
-the live documentation corpus, host inspection, and browser-based Streamlit
-interaction remain unverified. Exact results are in `docs/PROGRESS.md`.
+test calls Groq, runs PowerShell, or repairs Windows. Phase 6 separately
+verified live Groq calls, local embeddings, read-only Windows tools, and
+Streamlit startup. Native FAISS loading and browser-based Streamlit interaction
+remain unverified. Exact results are in `docs/PROGRESS.md`.
 
 See docs/PROGRESS.md for actual implementation status
 and test results.
 
 ## 12. Development Roadmap
 
-- [ ] Initialize project structure and Groq integration
+- [x] Initialize project structure and Groq integration
 - [x] Implement Supervisor and shared LangGraph state
-- [x] Implement three specialist agents (text analysis only; runtime unverified)
+- [x] Implement three specialist agents (live single-specialist paths verified)
 - [x] Add FAISS RAG and curated Microsoft documentation
 - [x] Add bounded read-only Windows diagnostic tools
 - [x] Implement corrective action proposals and IEEE verification
 - [x] Add controlled execution for the disposable OSGuard demo cache only
 - [x] Implement post-repair validation for that action
 - [x] Add mocked Phase 3 and Phase 4 integration coverage
-- [ ] Verify native FAISS indexing and live Windows/Groq workflow
+- [ ] Verify native FAISS indexing and retrieval after the existing policy block is resolved
+- [x] Verify live Groq structured classification, three specialists, and read-only Windows tools
 - [ ] Prepare final demonstration
 
 Update this checklist as features are implemented.
@@ -455,10 +457,48 @@ The current Windows environment blocks FAISS's native `_swigfaiss` module
 under Application Control. The automated suite uses a deterministic FAISS test
 double, so native index construction and retrieval still need verification
 after that environment restriction is resolved. No security policy was
-bypassed. Live Groq, browser-based Streamlit interaction, and operation of the
-demo repair outside isolated pytest fixtures still require manual Windows
-verification. The local checkpoint and execution ledger are process-memory
+bypassed. Live Groq classification and single-specialist workflows succeeded,
+but the live documentation corpus and native retrieval could not be checked.
+Browser-based Streamlit approval and operation of the demo repair outside
+isolated pytest fixtures still require manual Windows verification. The local
+checkpoint and execution ledger are process-memory
 only; restarting the app does not preserve a pending approval session.
+
+### Repeatable local verification
+
+These steps are for a local Windows 11 session with Python 3.14 and the project
+dependencies installed. The tool smoke check prints only statuses, bounded
+counts, and basic numeric system measurements; it omits process names and event
+contents.
+
+```powershell
+.\.venv\Scripts\python.exe scripts/verify_windows_tools.py
+.\.venv\Scripts\python.exe test_groq.py
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe -m streamlit run app.py --server.address 127.0.0.1
+```
+
+In Streamlit, try these requests separately:
+
+1. `My Windows laptop has high CPU usage. Can you investigate what is happening?`
+   Check that Diagnostic Agent shows read-only measurements separately from
+   user reports and hypotheses.
+2. `I want to list files in a directory. Is this PowerShell command safe for
+   that intent: Remove-Item -Recurse -Force C:\TestFolder` Check that Command
+   Verification flags the destructive command and never executes it.
+3. `My app reports a missing .NET Desktop Runtime. I have version 7.0
+   installed. Which version does it require?` Without indexed documentation,
+   the requirement must remain unknown and no installation should run.
+4. Select **Prepare disposable demo cache**, then submit
+   `Clear the OSGuard demo cache.` Review the IEEE checks and exact plan. First
+   choose **DECLINE** and confirm no execution is reported. Submit the same
+   request again, choose **APPROVE**, and confirm post-repair inspection reports
+   the actual result. Refresh the page to confirm it does not submit again.
+
+If Application Control still blocks `_swigfaiss`, expect retrieval to report a
+missing or unavailable index. Do not treat that as a successful live RAG test.
+After the device's approved policy resolution, build the index with the command
+in section 8 and confirm retrieved passages include title, URL, and source ID.
 
 ## 14. Project Documentation
 

@@ -8,6 +8,7 @@ from typing import Any
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import ValidationError
 
+from osguard.agents._common import groq_structured_output
 from osguard.config import GroqSettings, load_settings
 from osguard.groq_client import create_chat_model
 from osguard.privacy import redact_sensitive_text
@@ -82,7 +83,7 @@ def create_supervisor_classifier(
     if active_model is None:
         active_settings = settings or load_settings()
         active_model = create_chat_model(active_settings, model_factory=model_factory)
-    structured_model = active_model.with_structured_output(SupervisorClassification)
+    structured_model = groq_structured_output(active_model, SupervisorClassification)
     chain = SUPERVISOR_PROMPT | structured_model
 
     def classify(user_request: str) -> SupervisorClassification:

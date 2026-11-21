@@ -1,10 +1,112 @@
 # OSGuard AI Progress
 
-## Current milestone: Phase 5 — controlled demo repair review and verification
+## Current milestone: Phase 6 — end-to-end integration review
+
+**Status:** Independent live Groq, read-only Windows, local embedding, and
+Streamlit startup paths were verified on Python 3.14.8 / Windows 11. Native
+FAISS remains blocked by Windows Application Control, so a full live RAG-backed
+workflow and browser-based approval demonstration are **not yet verified**.
+The architecture and sole executable demo repair were preserved.
+
+### Integration work and defects fixed
+
+- Live text completion via the centralized `ChatGroq` factory succeeded using
+  configured model `openai/gpt-oss-120b`; the API key was not printed.
+- A live structured Supervisor request exposed a real defect: the default
+  function-calling path returned HTTP 400 `tool_use_failed` when Groq supplied
+  `available_environment: null`. Shared structured invocations now select
+  Groq JSON Schema mode (`strict=False`) for Pydantic contracts. The configured
+  model supports that mode, and a subsequent live structured classification
+  returned `SupervisorClassification(intent=diagnose,
+  selected_specialists=[diagnostic])`. Two offline regression tests verify the
+  mode and compatibility with injected model doubles.
+- Distinct live single-specialist graph workflows completed: memory diagnosis
+  selected Diagnostic Agent, collected a successful `get_memory_info` result,
+  and retained two observations and two hypotheses; software dependency review
+  selected Compatibility Agent and kept an undocumented requirement `unknown`;
+  `Get-Process` review selected Command Verification Agent, reported low risk
+  for the stated listing intent, and kept `should_execute=False`. Each ended
+  with IEEE `no_actions`, no repair, and no graph errors. The missing FAISS
+  index was reported as `index_missing` rather than fabricated evidence.
+- The read-only Windows smoke script returned success for system metadata,
+  process/CPU, memory, local disk, an existing service, and System event logs.
+  A nonexistent service returned `not_found`. A separate 24-hour System query
+  returned three records with expected event ID/data types. The host reported
+  Windows 11 build 26300 / AMD64. The bounded 200-process scan took 16.372
+  seconds on this machine; process names and event contents were not printed.
+- The cached Sentence Transformers model produced a 384-dimensional embedding
+  with offline mode enabled. Streamlit started on loopback, returned HTTP 200
+  from `/_stcore/health`, and the script ran in headless AppTest with zero
+  exceptions, three buttons, and one text area. A browser session was not run.
+- The existing full graph tests cover selective and multiple specialist routing,
+  state aggregation, evidence preservation, IEEE ordering and denial, partial
+  failures, exact-plan approval/decline, once-per-plan execution, and fresh
+  post-repair validation. The registered handler ran only against disposable
+  pytest temporary data. No host repair or PowerShell command was run.
+
+### Exact automated and runtime results
+
+- Focused structured-output affected tests:
+  `pytest tests/test_supervisor_graph.py tests/test_specialist_agents.py
+  tests/test_ieee_verification.py -q --disable-warnings
+  --log-disable=langgraph.checkpoint.serde.jsonplus`:
+  **54 passed, 17 warnings** in 5.12 seconds.
+- New regression module run:
+  `pytest tests/test_groq_client.py -q --disable-warnings
+  --log-disable=langgraph.checkpoint.serde.jsonplus`:
+  **11 passed, 17 warnings** in 3.49 seconds.
+- One final full-suite run:
+  `.\.venv\Scripts\python.exe -m pytest -q --disable-warnings
+  --log-disable=langgraph.checkpoint.serde.jsonplus`:
+  **141 passed, 1 skipped, 17 warnings** in 40.42 seconds. The one skip was
+  actual directory-symlink creation (`WinError 1314`, privilege unavailable);
+  mocked junction and symlink guard tests passed. The warnings are existing
+  `langsmith` deprecations.
+- Direct `import faiss` failed on `faiss-cpu` 1.16.0 with `DLL load failed while
+  importing _swigfaiss: An Application Control policy has blocked this file.`
+  `data/faiss/index.faiss` is absent. No index build, persistence/load, real
+  retrieval query, or metadata retrieval could be verified. The installed
+  release provides a [CPython 3.14 Windows x64 wheel](https://pypi.org/project/faiss-cpu/),
+  so this remains an observed local policy restriction; it was not bypassed.
+- Two live graph probe commands completed graph invocation but failed while
+  formatting summaries because the probes used nonexistent schema attributes
+  (`FinalResponse.status` and `CommandVerificationFinding.risk_level`). They
+  were not rerun. Distinct later workflows used the actual fields and returned
+  successful structured summaries. See `ERRORS.md` for all observed errors.
+
+### Files modified in Phase 6
+
+- `src/osguard/agents/_common.py`, `src/osguard/supervisor.py`: Groq JSON Schema
+  structured-output selection.
+- `tests/test_groq_client.py`: two regression tests.
+- `scripts/verify_windows_tools.py`: privacy-limited read-only runtime check.
+- `README.md`, `docs/ARCHITECTURE.md`, `docs/PROGRESS.md`, `ERRORS.md`:
+  runtime status, manual demonstration steps, and errors.
+- A pre-existing modified `osguard-review.zip` was not changed by this work.
+
+### Remaining checks
+
+- Native FAISS index build/load/search and source metadata preservation require
+  the device's approved resolution of the existing Application Control block.
+  No backend substitution, untrusted DLL, or security-policy change was made.
+- Browser interaction with Streamlit, including visual review of approval,
+  decline, and post-repair status, remains manual. Headless startup and fixture
+  UI tests do not prove a browser session. The README gives exact steps.
+- Live multi-specialist coordination and live Groq-generated proposals with
+  documentation evidence were not exercised; deterministic tests cover those
+  flows. Rate-limit and timeout translation were tested with injected errors,
+  and were not triggered by live Groq requests.
+- The process scan latency on this host may be noticeable in the UI. The
+  checkpoint and execution ledger remain process-local; other repairs remain
+  recommendation-only. Phase 6 cannot be called fully verified while native
+  retrieval is blocked.
+
+## Historical report: Phase 5 — controlled demo repair review and verification
 
 **Status:** The existing Phase 5 implementation passed focused and full
 automated verification on `.venv` CPython 3.14.8. This review found no
-implementation defect requiring a code change. Phase 6 was not started.
+implementation defect requiring a code change. Phase 6 had not started at the
+time of that review.
 
 ### Implemented and reviewed
 
@@ -88,7 +190,8 @@ and one-time resume cursor, not a browser session.
 ### Next phase
 
 Phase 5 is ready for a manual Windows demonstration of the disposable fixture
-once the remaining environment restrictions are handled. Phase 6 has not begun.
+once the remaining environment restrictions are handled. Phase 6 had not begun
+at the time of this historical report.
 
 ## Historical report: Phase 4 — IEEE verification framework
 

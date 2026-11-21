@@ -4,12 +4,14 @@ from types import SimpleNamespace
 import pytest
 
 from osguard.config import GroqSettings
+from osguard.agents._common import groq_structured_output
 from osguard.groq_client import (
     GroqProviderUnavailable,
     GroqRequestError,
     ask_groq,
     create_chat_model,
 )
+from osguard.schemas import SupervisorClassification
 
 
 @pytest.fixture
@@ -39,6 +41,27 @@ def test_create_chat_model_uses_centralized_groq_settings(settings):
             "max_retries": 2,
         }
     ]
+
+
+def test_groq_structured_output_uses_json_schema_mode():
+    calls = []
+
+    class ModelWithGroqMethods:
+        def with_structured_output(self, schema, *, method="function_calling", strict=None):
+            calls.append((schema, method, strict))
+            return "structured"
+
+    assert groq_structured_output(ModelWithGroqMethods(), SupervisorClassification) == "structured"
+    assert calls == [(SupervisorClassification, "json_schema", False)]
+
+
+def test_groq_structured_output_keeps_injected_model_compatible():
+    class InjectedModel:
+        def with_structured_output(self, schema):
+            assert schema is SupervisorClassification
+            return "test-double"
+
+    assert groq_structured_output(InjectedModel(), SupervisorClassification) == "test-double"
 
 
 def test_create_chat_model_explains_application_control_block(settings, monkeypatch):

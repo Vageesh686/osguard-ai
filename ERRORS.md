@@ -1,6 +1,48 @@
 # Errors and Environment Blockers
 
-## Current check — 2026-11-21
+## Phase 6 checks — 2026-11-21
+
+- **FAISS remains blocked:** `faiss-cpu` 1.16.0 is installed, but direct
+  `import faiss` fails with `ImportError: DLL load failed while importing
+  _swigfaiss: An Application Control policy has blocked this file.` The local
+  `data/faiss/index.faiss` file is absent. No native index was built or queried,
+  and no policy change or package reinstall was attempted. The published
+  [CPython 3.14 Windows x64 wheel](https://pypi.org/project/faiss-cpu/) and
+  [upstream Python 3.14 build configuration](https://github.com/facebookresearch/faiss/blob/main/pyproject.toml)
+  support this Python/platform combination; the observed failure is the local
+  code-integrity restriction, not evidence of a missing wheel. The cached
+  Sentence Transformers model did produce a 384-dimensional vector offline.
+- **Groq structured-output defect, fixed:** the original live Supervisor call
+  reached Groq but received HTTP 400 `tool_use_failed`: the default tool-call
+  path produced `available_environment: null`, while the schema required an
+  object. `src/osguard/agents/_common.py` and `src/osguard/supervisor.py` now
+  select Groq's JSON Schema mode (`strict=False`) for the existing Pydantic
+  contracts. The post-fix structured classification succeeded;
+  regression tests cover the mode selection. The configured
+  `openai/gpt-oss-120b` model is listed in
+  [Groq Structured Outputs](https://console.groq.com/docs/structured-outputs).
+- **Network sandbox:** the initial small Groq request failed with a connection
+  error inside the command sandbox. Outside that sandbox, the same smoke check
+  succeeded. A structured-call attempt inside the sandbox showed Windows
+  socket error `WinError 10013`; outside it, Groq was reachable. The API key
+  was never printed or logged.
+- **Inspection-script errors, not graph failures:** two one-line live graph
+  probes completed `graph.invoke(...)` but then failed while formatting their
+  results. One referenced nonexistent `FinalResponse.status`; another referenced
+  nonexistent `CommandVerificationFinding.risk_level`. The actual fields are
+  `FinalResponse.workflow_status` and `CommandVerificationFinding.risk`. These
+  probe commands were not rerun. Distinct memory, compatibility, and safe
+  command scenarios later completed and returned structured summaries.
+- **One diagnostic command syntax error:** an early shell-quoted Python
+  configuration probe raised `SyntaxError: unterminated string literal` before
+  running project code. A separate simpler configuration check confirmed the
+  Groq key was present and the configured model ID without printing the key.
+- **Process sampling latency:** the live bounded process scan of 200 processes
+  took 16.372 seconds on this host, despite a requested 0.05-second CPU sample.
+  This is a performance limitation for the current read-only tool, not a test
+  failure or evidence of an inaccurate process value.
+
+## Historical Phase 3 check — 2026-11-21
 
 - `.venv` runs CPython 3.14.8 x64.
 - `pydantic_core` 2.50.5, `langchain_groq`, `langgraph`,
@@ -55,9 +97,10 @@ suite completed under that interpreter.
 - The earlier import sweep did not verify FAISS or Sentence Transformers;
   their current observed import results are also recorded above.
 
-## Verification deferred
+## Earlier deferred checks (before Phase 6)
 
 - Automated tests use fake model outputs and do not make live Groq requests.
-- The Groq client imports now, but a live provider request has not been run.
+- At that point the Groq client imported, but no live provider request had been
+  run. Phase 6 live results are recorded above.
 - Native FAISS loading remains blocked. Once it is permitted through the
   device's approved process, run the index builder and verify real retrieval.

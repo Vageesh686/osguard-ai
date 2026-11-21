@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import inspect
 from collections.abc import Callable, Mapping
 from typing import Any, TypeVar
 
@@ -21,6 +22,16 @@ ModelProvider = Callable[[], Any]
 
 class InvalidSpecialistOutput(ValueError):
     """Raised when a provider response does not match its Pydantic contract."""
+
+
+def groq_structured_output(model: Any, schema: type[BaseModel]) -> Any:
+    """Use Groq JSON Schema mode; preserve simple injected model test doubles."""
+    structured = model.with_structured_output
+    if "method" in inspect.signature(structured).parameters:
+        # The current Pydantic contracts contain optional fields, so Groq's
+        # strict mode requirements cannot be assumed for every schema.
+        return structured(schema, method="json_schema", strict=False)
+    return structured(schema)
 
 
 def create_model_provider(
@@ -55,7 +66,7 @@ def create_structured_invoker(
     def invoke(values: Mapping[str, Any]) -> StructuredModel:
         nonlocal chain
         if chain is None:
-            chain = prompt | model_provider().with_structured_output(output_schema)
+            chain = prompt | groq_structured_output(model_provider(), output_schema)
         raw_result = chain.invoke(dict(values))
         if isinstance(raw_result, output_schema):
             return raw_result
