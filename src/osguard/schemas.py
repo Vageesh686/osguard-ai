@@ -167,6 +167,7 @@ class RetrievalResult(StrictModel):
         "retrieval_error",
     ]
     query: str
+    backend: Literal["faiss", "in_memory", "unavailable"] | None = None
     evidence: list[RetrievedEvidence] = Field(default_factory=list)
     message: str = ""
     filters: dict[str, str] = Field(default_factory=dict)

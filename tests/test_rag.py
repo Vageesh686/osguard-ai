@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from osguard.rag import ingest, retriever
+from osguard.rag import ingest, memory, retriever
 from osguard.rag.retriever import search_documentation
 from osguard.rag.sources import load_sources
 
@@ -70,6 +70,13 @@ class _FakeEmbeddings:
 
     def embed_query(self, text):
         return self._embed(text)
+
+
+@pytest.fixture(autouse=True)
+def reset_retrieval_caches():
+    retriever.clear_index_cache()
+    yield
+    retriever.clear_index_cache()
 
 
 @pytest.fixture
@@ -135,6 +142,7 @@ def test_build_load_search_and_preserve_document_metadata(tmp_path, fake_faiss):
         "CPU process", index_dir=index_dir, embeddings=_FakeEmbeddings(), top_k=2
     )
     assert result.status == "success"
+    assert result.backend == "faiss"
     evidence = result.evidence[0]
     assert evidence.source_id.startswith("cpu-process-doc#")
     assert evidence.title == "CPU and process guidance"
@@ -191,3 +199,98 @@ def test_metadata_filters_apply_exactly_after_similarity_search(tmp_path, fake_f
         "cpu process", {"category": "storage_filesystem"}, index_dir=index_dir,
         embeddings=_FakeEmbeddings(),
     ).status == "no_results"
+
+
+def test_policy_block_uses_cached_cosine_fallback_and_preserves_provenance(tmp_path, monkeypatch):
+    config = _source_config(tmp_path / "sources.json")
+    attempts = {"faiss": 0, "fetch": 0, "embed_documents": 0}
+
+    def blocked_faiss():
+        attempts["faiss"] += 1
+        raise ImportError("DLL load failed: An Application Control policy has blocked this file.")
+
+    def fetch(_url):
+        attempts["fetch"] += 1
+        return "<main><h1>CPU process reference</h1><p>Process CPU measurements help investigate high CPU usage without proving a root cause.</p></main>"
+
+    class CountingEmbeddings(_FakeEmbeddings):
+        def embed_documents(self, texts):
+            attempts["embed_documents"] += 1
+            return super().embed_documents(texts)
+
+    monkeypatch.setattr(retriever, "_faiss_and_numpy", blocked_faiss)
+    monkeypatch.setattr(memory, "fetch_document", fetch)
+    encoder = CountingEmbeddings()
+    kwargs = {"index_dir": tmp_path / "missing", "source_config": config, "embeddings": encoder}
+
+    first = search_documentation("CPU process", {"source_id": "cpu-process-doc"}, top_k=1, **kwargs)
+    second = search_documentation("process", top_k=1, **kwargs)
+    assert first.status == second.status == "success"
+    assert first.backend == second.backend == "in_memory"
+    assert len(first.evidence) == 1
+    evidence = first.evidence[0]
+    assert evidence.source_id.startswith("cpu-process-doc#cpu-process-doc-")
+    assert evidence.title == "CPU and process guidance"
+    assert evidence.source_url == "https://learn.microsoft.com/test"
+    assert evidence.os_version == "Windows 11"
+    assert evidence.metadata["document_source_id"] == "cpu-process-doc"
+    assert evidence.metadata["category"] == "process_cpu"
+    assert evidence.metadata["section"] == "CPU process reference"
+    assert evidence.metadata["chunk_id"] in evidence.source_id
+    assert evidence.metadata["relevance_score"] > 0
+    assert attempts == {"faiss": 1, "fetch": 1, "embed_documents": 1}
+
+    absent = search_documentation("CPU", {"category": "storage_filesystem"}, **kwargs)
+    assert absent.status == "no_results"
+    assert absent.backend == "in_memory"
+    assert absent.evidence == []
+
+
+def test_fallback_fails_without_documents_and_never_invents_evidence(tmp_path, monkeypatch):
+    config = _source_config(tmp_path / "sources.json")
+    monkeypatch.setattr(
+        retriever, "_faiss_and_numpy",
+        lambda: (_ for _ in ()).throw(ImportError("Application Control policy has blocked this file")),
+    )
+    monkeypatch.setattr(memory, "fetch_document", lambda _url: (_ for _ in ()).throw(OSError("offline")))
+    result = search_documentation(
+        "CPU", index_dir=tmp_path / "missing", source_config=config, embeddings=_FakeEmbeddings()
+    )
+    assert result.status == "retrieval_error"
+    assert result.backend == "unavailable"
+    assert result.evidence == []
+
+
+def test_existing_faiss_index_uses_fallback_only_when_native_load_is_blocked(
+    tmp_path, monkeypatch, fake_faiss
+):
+    config = _source_config(tmp_path / "sources.json")
+    index_dir = tmp_path / "index"
+    html = "<main><h1>CPU process reference</h1><p>Process CPU measurements help investigate high CPU usage without proving a root cause.</p></main>"
+    assert ingest.build_index(
+        source_config=config, index_dir=index_dir,
+        fetcher=lambda _url: html, embeddings=_FakeEmbeddings(),
+    ).status == "success"
+
+    monkeypatch.setattr(
+        retriever, "_faiss_and_numpy",
+        lambda: (_ for _ in ()).throw(ImportError("Application Control policy has blocked this file")),
+    )
+    monkeypatch.setattr(memory, "fetch_document", lambda _url: html)
+    result = search_documentation(
+        "CPU process", index_dir=index_dir, source_config=config, embeddings=_FakeEmbeddings()
+    )
+    assert result.status == "success"
+    assert result.backend == "in_memory"
+    assert result.evidence[0].source_url == "https://learn.microsoft.com/test"
+
+
+def test_non_policy_faiss_load_error_does_not_activate_fallback(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        retriever, "_faiss_and_numpy",
+        lambda: (_ for _ in ()).throw(ImportError("unrelated native dependency missing")),
+    )
+    result = search_documentation("CPU", index_dir=tmp_path / "missing")
+    assert result.status == "retrieval_error"
+    assert result.backend == "unavailable"
+    assert result.evidence == []

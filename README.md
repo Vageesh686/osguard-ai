@@ -75,7 +75,7 @@ A LangGraph Supervisor coordinates specialized workflows:
 - Compatibility Agent
 
 Specialists receive the Supervisor classification and one shared evidence
-snapshot. Before specialists run, OSGuard performs one bounded FAISS lookup and
+snapshot. Before specialists run, OSGuard performs one bounded documentation lookup and
 selects only relevant read-only Windows checks. Diagnostic findings keep user
 reports, tool measurements, documentation citations, and hypotheses distinct.
 Common paths and identifiers are redacted before Groq inference; redaction is
@@ -114,15 +114,21 @@ remain unverified.
 
 ### Retrieval-Augmented Generation
 
-The shared FAISS index uses a curated allowlist of official Microsoft Learn
+The shared RAG layer uses a curated allowlist of official Microsoft Learn
 sources in `data/documentation_sources.json`. It stores title, URL, Windows
 scope, category, section, chunk ID, passage, and relevance score. Retrieved
 text is untrusted reference material and cannot authorize commands or establish
 a diagnosis by itself.
 
-The index is built locally with Sentence Transformers embeddings. No embedding
-service is called. The application returns an explicit unavailable status when
-the index has not been built or cannot be loaded.
+FAISS remains the primary persistent index. If Windows Application Control
+blocks its native library, a separate LangChain `InMemoryVectorStore` fetches
+the same allowlisted pages, uses the same local Sentence Transformers model and
+chunking, and caches document embeddings for the application process. Search
+uses cosine similarity and returns at most eight passages. The first fallback
+lookup needs network access to the Microsoft pages; later lookups in the same
+process reuse the in-memory index. No embedding service is called. The UI shows
+whether FAISS, the in-memory fallback, or neither backend served the request.
+Failed retrieval returns no citations.
 
 Generate explanations that distinguish supporting evidence
 from possible diagnostic hypotheses.
@@ -196,7 +202,8 @@ The target architecture consists of:
 11. Final Report Generator
 
 Currently implemented: Supervisor, typed shared state, three specialist
-workflows, multi-specialist routing, shared FAISS retrieval, bounded read-only
+workflows, multi-specialist routing, FAISS retrieval with a cached in-memory
+fallback, bounded read-only
 Windows tools, result aggregation, corrective recommendation proposals,
 mandatory IEEE verification, exact demo repair planning and eligibility,
 checkpointed approval, one restricted executor, post-repair validation, and
@@ -216,7 +223,7 @@ For detailed architecture and workflows, see:
 | Agent Orchestration | LangGraph |
 | LLM Integration | LangChain + Groq |
 | LLM Provider | Groq API |
-| Vector Database | FAISS |
+| Vector Database | FAISS primary; LangChain InMemoryVectorStore fallback |
 | Embeddings | Sentence Transformers |
 | Data Validation | Pydantic |
 | OS Diagnostics | Python, psutil, Windows APIs |
@@ -289,7 +296,7 @@ measurements and retrieved documentation where available. The exact request
 `Clear the OSGuard demo cache.` uses a fixed local route without a Groq call.
 After explicit fixture preparation and exact-plan approval, it can clear only
 that disposable cache. Submitted commands are never executed. Configure `.env`
-and build the local documentation index once:
+and, where native FAISS is allowed, build the local documentation index once:
 
 ```powershell
 .\.venv\Scripts\python.exe -m osguard.rag.build_index
@@ -300,6 +307,9 @@ Index construction fetches only the Microsoft URLs listed in
 embeddings. The first build needs network access to those sources and may
 download the embedding model. Later requests reuse the persisted `data/faiss/`
 index instead of rebuilding it. The generated index is local and gitignored.
+On this host Smart App Control blocks `faiss.dll`, so this build remains
+unavailable. Streamlit instead builds an in-memory index on its first
+documentation lookup while the approved Microsoft URLs are reachable.
 Then start Streamlit:
 
 ```powershell
@@ -418,8 +428,9 @@ interrupt/resume, rejection paths, repeat-submission protection, and fresh
 post-repair measurement. Other tests use deterministic models and tools; no
 test calls Groq, runs PowerShell, or repairs Windows. Phase 6 separately
 verified live Groq calls, local embeddings, read-only Windows tools, and
-Streamlit startup. Native FAISS loading and browser-based Streamlit interaction
-remain unverified. Exact results are in `docs/PROGRESS.md`.
+Streamlit startup. A later live fallback lookup retrieved real Microsoft
+passages. Native FAISS loading and browser-based Streamlit interaction remain
+unverified. Exact results are in `docs/PROGRESS.md`.
 
 See docs/PROGRESS.md for actual implementation status
 and test results.
@@ -430,6 +441,7 @@ and test results.
 - [x] Implement Supervisor and shared LangGraph state
 - [x] Implement three specialist agents (live single-specialist paths verified)
 - [x] Add FAISS RAG and curated Microsoft documentation
+- [x] Add cached in-memory retrieval when Smart App Control blocks FAISS
 - [x] Add bounded read-only Windows diagnostic tools
 - [x] Implement corrective action proposals and IEEE verification
 - [x] Add controlled execution for the disposable OSGuard demo cache only
@@ -453,12 +465,13 @@ It does not aim to provide:
 - Automatic administrator-level repairs
 - Production-grade endpoint management
 
-The current Windows environment blocks FAISS's native `_swigfaiss` module
-under Application Control. The automated suite uses a deterministic FAISS test
-double, so native index construction and retrieval still need verification
-after that environment restriction is resolved. No security policy was
-bypassed. Live Groq classification and single-specialist workflows succeeded,
-but the live documentation corpus and native retrieval could not be checked.
+The current Windows environment blocks FAISS's unsigned `faiss.dll` under
+Smart App Control. Python surfaces this while importing `_swigfaiss`.
+The automated suite uses a deterministic FAISS test double, so native index
+construction and retrieval still need verification after the approved resolution
+of that restriction. No security policy was changed. The fallback retrieved
+real Microsoft passages with the local embedding model, but it needs network
+access on first use in each application process and does not persist its index.
 Browser-based Streamlit approval and operation of the demo repair outside
 isolated pytest fixtures still require manual Windows verification. The local
 checkpoint and execution ledger are process-memory
@@ -495,10 +508,11 @@ In Streamlit, try these requests separately:
    request again, choose **APPROVE**, and confirm post-repair inspection reports
    the actual result. Refresh the page to confirm it does not submit again.
 
-If Application Control still blocks `_swigfaiss`, expect retrieval to report a
-missing or unavailable index. Do not treat that as a successful live RAG test.
-After the device's approved policy resolution, build the index with the command
-in section 8 and confirm retrieved passages include title, URL, and source ID.
+If Smart App Control blocks `faiss.dll`, the UI should show **In-memory fallback
+active** when the Microsoft pages are reachable. If they cannot be loaded, it
+should show **Retrieval unavailable** with no citations. After an approved
+resolution of the native block, build the FAISS index with the command above
+and confirm the UI shows **FAISS available**.
 
 ## 14. Project Documentation
 

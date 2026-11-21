@@ -12,6 +12,7 @@ from typing import Any
 
 from osguard.rag.embeddings import get_local_embeddings
 from osguard.rag.ingest import DEFAULT_INDEX_DIR, _faiss_and_numpy
+from osguard.rag.sources import DEFAULT_SOURCE_CONFIG
 from osguard.schemas import RetrievedEvidence, RetrievalResult
 
 
@@ -31,15 +32,39 @@ class _LoadedIndex:
 
 _CACHE: dict[str, _LoadedIndex] = {}
 _CACHE_LOCK = RLock()
+_FAISS_POLICY_BLOCKED = False
 
 
 def clear_index_cache(index_dir: str | Path | None = None) -> None:
     """Discard a loaded in-memory snapshot after a local index rebuild."""
+    global _FAISS_POLICY_BLOCKED
     with _CACHE_LOCK:
         if index_dir is None:
             _CACHE.clear()
+            _FAISS_POLICY_BLOCKED = False
         else:
             _CACHE.pop(str(Path(index_dir).resolve()), None)
+    from osguard.rag.memory import clear_memory_cache
+
+    clear_memory_cache()
+
+
+def _is_application_control_block(exc: BaseException) -> bool:
+    message = str(exc).casefold()
+    return "application control policy" in message and "blocked" in message
+
+
+def _fallback_search(
+    query: str, filters: dict[str, str], *, top_k: int,
+    embeddings: Any | None, source_config: str | Path, min_relevance: float,
+) -> RetrievalResult:
+    from osguard.rag.memory import search_in_memory
+
+    return search_in_memory(
+        query, filters, top_k=top_k,
+        embeddings=embeddings or get_local_embeddings(),
+        source_config=source_config, min_relevance=min_relevance,
+    )
 
 
 def _load_index(index_dir: Path) -> _LoadedIndex:
@@ -94,6 +119,7 @@ def search_documentation(
     index_dir: str | Path = DEFAULT_INDEX_DIR,
     embeddings: Any | None = None,
     min_relevance: float = MIN_RELEVANCE,
+    source_config: str | Path = DEFAULT_SOURCE_CONFIG,
 ) -> RetrievalResult:
     """Return a small structured set of related chunks, or an explicit status.
 
@@ -136,28 +162,65 @@ def search_documentation(
             message=f"top_k must be between 1 and {MAX_TOP_K}.",
         )
 
+    global _FAISS_POLICY_BLOCKED
+    with _CACHE_LOCK:
+        blocked = _FAISS_POLICY_BLOCKED
+    if blocked:
+        return _fallback_search(
+            query_text, filters, top_k=requested, embeddings=embeddings,
+            source_config=source_config, min_relevance=min_relevance,
+        )
+
     path = Path(index_dir)
     if not (path / "index.faiss").exists():
+        try:
+            _faiss_and_numpy()
+        except (ImportError, OSError) as exc:
+            if _is_application_control_block(exc):
+                with _CACHE_LOCK:
+                    _FAISS_POLICY_BLOCKED = True
+                return _fallback_search(
+                    query_text, filters, top_k=requested, embeddings=embeddings,
+                    source_config=source_config, min_relevance=min_relevance,
+                )
+            return RetrievalResult(
+                status="retrieval_error", query=query_text, filters=filters,
+                backend="unavailable", message=f"FAISS could not be loaded ({type(exc).__name__}).",
+            )
         return RetrievalResult(
-            status="index_missing", query=query_text,
+            status="index_missing", query=query_text, backend="unavailable",
             message="The local documentation index has not been built.", filters=filters,
         )
     try:
         snapshot = _load_index(path)
     except FileNotFoundError:
         return RetrievalResult(
-            status="index_missing", query=query_text,
+            status="index_missing", query=query_text, backend="unavailable",
             message="The local documentation index is incomplete; rebuild it.", filters=filters,
         )
-    except (ValueError, json.JSONDecodeError, OSError) as exc:
+    except (ImportError, OSError) as exc:
+        if _is_application_control_block(exc):
+            with _CACHE_LOCK:
+                _FAISS_POLICY_BLOCKED = True
+            return _fallback_search(
+                query_text, filters, top_k=requested, embeddings=embeddings,
+                source_config=source_config, min_relevance=min_relevance,
+            )
         return RetrievalResult(
-            status="index_corrupt", query=query_text,
+            status="index_corrupt" if isinstance(exc, OSError) else "retrieval_error",
+            query=query_text, backend="unavailable",
+            message=f"The local FAISS index could not be loaded ({type(exc).__name__}).",
+            filters=filters,
+        )
+    except (ValueError, json.JSONDecodeError) as exc:
+        return RetrievalResult(
+            status="index_corrupt", query=query_text, backend="unavailable",
             message=f"The local documentation index could not be validated ({type(exc).__name__}).",
             filters=filters,
         )
     except Exception as exc:
         return RetrievalResult(
-            status="retrieval_error", query=query_text,
+            status="retrieval_error", query=query_text, backend="unavailable",
             message=f"The local FAISS index could not be loaded ({type(exc).__name__}).",
             filters=filters,
         )
@@ -166,7 +229,7 @@ def search_documentation(
     configured_model = getattr(encoder, "model_name", snapshot.model_name)
     if configured_model != snapshot.model_name:
         return RetrievalResult(
-            status="retrieval_error", query=query_text,
+            status="retrieval_error", query=query_text, backend="unavailable",
             message="The index uses a different embedding model; rebuild it with the configured local model.",
             filters=filters,
         )
@@ -205,15 +268,15 @@ def search_documentation(
                 break
         if not evidence:
             return RetrievalResult(
-                status="no_results", query=query_text,
+                status="no_results", query=query_text, backend="faiss",
                 message="No indexed passage met the relevance and filter criteria.", filters=filters,
             )
         return RetrievalResult(
-            status="success", query=query_text, evidence=evidence,
+            status="success", query=query_text, backend="faiss", evidence=evidence,
             message=f"Retrieved {len(evidence)} relevant passage(s).", filters=filters,
         )
     except Exception as exc:
         return RetrievalResult(
-            status="retrieval_error", query=query_text,
+            status="retrieval_error", query=query_text, backend="unavailable",
             message=f"Documentation search failed ({type(exc).__name__}).", filters=filters,
         )

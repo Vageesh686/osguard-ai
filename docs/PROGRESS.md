@@ -1,5 +1,61 @@
 # OSGuard AI Progress
 
+## Current milestone: RAG fallback for the documented FAISS policy block
+
+**Status:** FAISS remains the primary backend and is still blocked by Smart App
+Control on this Windows 11 / Python 3.14.8 host. A separate LangChain
+`InMemoryVectorStore` fallback completed a real lookup of the allowlisted
+Microsoft documentation, using the existing local Sentence Transformers model.
+The Supervisor, specialists, IEEE gate, and repair path were not changed.
+
+### Implemented
+
+- Added policy-block-only backend selection to `search_documentation`. When
+  FAISS is available, its persisted index and cosine search remain unchanged.
+  Other FAISS failures remain explicit errors rather than silently switching
+  backends.
+- Added a process-cached in-memory cosine index from the same validated source
+  list, HTML extractor, chunker, and local embedding model. Documents are
+  embedded once per cached index; each request embeds only its query. Exact
+  category, OS version, and source-ID filters and the existing 1–8 top-k bound
+  apply. Retrieved evidence retains title, URL, OS scope, section, chunk ID,
+  source ID, passage, and score. Failed loads produce no citations.
+- Added an explicit retrieval backend field and Streamlit labels: **FAISS
+  available**, **In-memory fallback active**, and **Retrieval unavailable**.
+
+### Verification and restrictions
+
+- Focused RAG and UI tests: `tests/test_rag.py tests/test_app_ui.py`:
+  **16 passed, 17 warnings** in 4.91 seconds. Tests use deterministic
+  embeddings and do not call Groq or make network requests. One additional
+  persisted-index block test was added afterward and included in the full run.
+- One complete suite run after implementation:
+  `.\.venv\Scripts\python.exe -m pytest -q --disable-warnings
+  --log-disable=langgraph.checkpoint.serde.jsonplus`:
+  **146 passed, 1 skipped, 17 warnings** in 13.54 seconds. The skipped test
+  requires directory-symlink creation privilege (`WinError 1314`); the
+  junction and mocked symlink guards remain covered. The warnings are the
+  existing dependency deprecations.
+- One live in-sandbox fallback attempt returned `retrieval_error`, zero
+  evidence. A focused source fetch failed with `WinError 10013` because the
+  command sandbox denied the socket. A separate read-only approved fetch
+  outside the sandbox succeeded, and a real fallback search returned
+  `status=success`, `backend=in_memory`, two Microsoft passages with IDs,
+  URLs, and cosine scores 0.5937 and 0.5559. This verifies live fallback
+  retrieval, not native FAISS or a full Groq-to-RAG graph run.
+- Native `faiss.dll` is unsigned and remains blocked by enforced Smart App
+  Control policy `{0283ac0f-fff1-49ae-ada1-8a933130cad6}`. No policy or
+  package change was made. The fallback fetches source pages and embeds them
+  on first use in each application process; it is not persisted and needs
+  network access for that first load. Browser interaction remains manual.
+
+### Files changed
+
+- `src/osguard/rag/memory.py`, `src/osguard/rag/retriever.py`,
+  `src/osguard/schemas.py`, `app.py`, `tests/test_rag.py`,
+  `tests/test_app_ui.py`, `README.md`, `ERRORS.md`,
+  `docs/ARCHITECTURE.md`, and this progress report.
+
 ## Current milestone: Phase 6 — end-to-end integration review
 
 **Status:** Independent live Groq, read-only Windows, local embedding, and

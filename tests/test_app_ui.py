@@ -162,7 +162,8 @@ def test_streamlit_ui_shows_read_only_environment_and_retrieval_failure(monkeypa
         os_build="22631", architecture="AMD64",
     )
     result["retrieval_result"] = RetrievalResult(
-        status="index_missing", query="cpu", message="Build the local index first."
+        status="index_missing", query="cpu", backend="unavailable",
+        message="Build the local index first."
     )
     result["tool_results"] = [
         ToolExecutionResult(
@@ -176,6 +177,7 @@ def test_streamlit_ui_shows_read_only_environment_and_retrieval_failure(monkeypa
     rendered = [(name, args) for name, args, _kwargs in fake_st.calls]
     assert any("observed by read-only tool" in str(args).casefold() for _name, args in rendered)
     assert any("index missing" in str(args).casefold() for name, args in rendered if name == "warning")
+    assert any("retrieval unavailable" in str(args).casefold() for name, args in rendered if name == "write")
     assert any("permission denied" in str(args).casefold() for _name, args in rendered)
     assert not any(name == "markdown" and "Official source" in str(args) for name, args in rendered)
 
@@ -194,7 +196,7 @@ def test_streamlit_ui_renders_retrieved_source_and_tool_measurement(monkeypatch)
         metadata={"relevance_score": 0.83},
     )
     result["retrieval_result"] = RetrievalResult(
-        status="success", query="cpu", evidence=[evidence]
+        status="success", query="cpu", backend="faiss", evidence=[evidence]
     )
     result["retrieved_evidence"] = [evidence]
     result["tool_results"] = [
@@ -210,6 +212,23 @@ def test_streamlit_ui_renders_retrieved_source_and_tool_measurement(monkeypatch)
     assert any(name == "markdown" and "learn.microsoft.com/cpu" in str(args) for name, args in rendered)
     assert any(name == "write" and "utilization_percent" in str(args) for name, args in rendered)
     assert any(name == "caption" and "measured data" in str(args).casefold() for name, args in rendered)
+    assert any(name == "write" and "FAISS available" in str(args) for name, args in rendered)
+
+
+def test_streamlit_ui_reports_in_memory_fallback_without_claiming_faiss(monkeypatch):
+    render_result, fake_st = _load_app_with_fake_streamlit(monkeypatch)
+    result = _base_result(
+        specialist_status="completed", workflow_status="specialists_completed",
+        message="Evidence collection completed.",
+    )
+    result["retrieval_result"] = RetrievalResult(
+        status="no_results", query="cpu", backend="in_memory",
+        message="No matching passages were found.",
+    )
+    render_result(result)
+    written = [str(args) for name, args, _kwargs in fake_st.calls if name == "write"]
+    assert any("In-memory fallback active" in item for item in written)
+    assert not any("FAISS available" in item for item in written)
 
 
 def test_streamlit_ui_displays_ieee_checks_sources_and_no_execution_controls(monkeypatch):

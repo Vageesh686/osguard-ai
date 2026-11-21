@@ -1,5 +1,27 @@
 # Errors and Environment Blockers
 
+## Current RAG backend check — 2026-11-21
+
+- Windows Code Integrity event 3077 blocked
+  `.venv/Lib/site-packages/faiss/faiss.dll` under the enforced
+  `VerifiedAndReputableDesktop` Smart App Control policy
+  `{0283ac0f-fff1-49ae-ada1-8a933130cad6}`. Correlated event 3089
+  reported zero signatures. Python names `_swigfaiss` because that extension
+  attempts to load the blocked DLL. The installed `faiss-cpu` 1.16.0 wheel
+  matches CPython 3.14 Windows x64, and the DLL and extension match their
+  installed package hashes. Native FAISS remains unavailable; no policy or
+  package change was attempted.
+- The first live fallback search returned `retrieval_error` with no citations
+  inside the command sandbox. A focused fetch exposed `WinError 10013` while
+  opening an allowlisted Microsoft URL. A separate approved read-only check
+  outside the network sandbox fetched that page, and a full fallback lookup
+  returned two real Microsoft passages using local embeddings. This was a
+  sandbox network restriction, not a retrieval-code defect.
+- The fallback keeps its document vectors in process memory. Its initial
+  construction needs the approved Microsoft URLs to be reachable; if none can
+  be loaded, it returns `retrieval_error` and no citations. It does not make
+  native FAISS available.
+
 ## Phase 6 checks — 2026-11-21
 
 - **FAISS remains blocked:** `faiss-cpu` 1.16.0 is installed, but direct

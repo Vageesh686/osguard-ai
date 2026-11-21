@@ -13,7 +13,7 @@ and post-repair validation.
 flowchart TD
     U[User request in Streamlit] --> S[LangGraph Supervisor]
     S --> E[One-pass shared evidence collection]
-    E --> R[Curated Microsoft docs in local FAISS]
+    E --> R[Curated Microsoft docs: FAISS or in-memory fallback]
     E --> T[Allowlisted read-only Windows tools]
     R --> X[Reducer-backed shared state]
     T --> X
@@ -54,7 +54,7 @@ Its Pydantic outputs use Groq JSON Schema mode with best-effort schema
 enforcement; application-side Pydantic validation and deterministic safety
 rules still govern accepted findings and actions.
 The evidence collector runs once after classification, performs at most one
-FAISS lookup, and invokes only the relevant fixed read-only tools. It does not
+documentation lookup, and invokes only the relevant fixed read-only tools. It does not
 expose a generic tool-calling loop. Classifier, model, retrieval function,
 tools, specialists, action proposer, and IEEE assessor can be injected so tests
 do not require Groq, the network, a local index, or host inspection.
@@ -87,7 +87,7 @@ passage. Compatibility requirements are retained only when their exact value
 appears in a retrieved passage with a valid cited source ID. A high CPU or
 memory reading is not treated as a confirmed root cause.
 
-## Shared FAISS retrieval
+## Shared documentation retrieval
 
 `data/documentation_sources.json` is the allowlist for official Microsoft Learn
 pages. The indexer accepts HTTPS sources only from `learn.microsoft.com` or
@@ -102,6 +102,17 @@ metadata filters for category, OS version, and source ID. Empty queries, missing
 or corrupt indexes, unsupported filters, no results, and retrieval errors are
 returned as explicit statuses. Retrieved pages are untrusted references, not
 commands or proof of a diagnosis.
+
+FAISS remains the primary backend when its native library and persisted index
+are available. If the documented Windows Application Control restriction blocks
+the native library, the same retrieval interface loads the allowlisted Microsoft
+pages through the existing HTML extractor and chunker, then indexes them with
+LangChain `InMemoryVectorStore` and the existing local embedding model. That
+store uses cosine similarity. It is cached once per process for each source
+configuration and embedding instance; subsequent queries embed only the query.
+The fallback requires network access when first constructed and is not
+persisted. The result carries an explicit backend label; failed construction
+returns no evidence or citations. Other FAISS errors do not trigger fallback.
 
 ## Read-only Windows tools
 
@@ -220,9 +231,9 @@ Streamlit started and its health endpoint responded, and its script ran under
 Streamlit's headless AppTest without exceptions. Browser interaction remains a
 manual check.
 
-Native FAISS loading is blocked by Windows Application Control on this host,
-so the existing FAISS indexer and live retrieval have not been verified. The
-graph preserves an explicit unavailable/missing retrieval status and does not
-replace FAISS with another backend. Offline tests cover routing, provenance,
-IEEE, approval, restricted fixture repair, and validation; they do not prove
-live indexed retrieval or broad Windows repair capability.
+Native FAISS loading is blocked by Smart App Control on this host, so the
+existing FAISS indexer and native retrieval have not been verified. A separate
+live in-memory fallback lookup retrieved Microsoft passages with source IDs and
+URLs. Offline tests cover routing, provenance, IEEE, approval, restricted
+fixture repair, and validation; they do not prove native FAISS indexing or broad
+Windows repair capability.

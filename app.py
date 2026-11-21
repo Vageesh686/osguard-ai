@@ -79,18 +79,34 @@ def _render_supervisor_result(result):
     retrieval = result.get("retrieval_result")
     if retrieval is None:
         st.caption("Documentation retrieval did not run.")
-    elif retrieval.status == "success":
+    elif retrieval.status == "not_applicable":
+        st.caption("Documentation retrieval was not required for this request.")
+    else:
+        backend_labels = {
+            "faiss": "FAISS available",
+            "in_memory": "In-memory fallback active",
+            "unavailable": "Retrieval unavailable",
+        }
+        backend_label = backend_labels.get(
+            retrieval.backend,
+            "Not reported" if retrieval.status == "success" else "Retrieval unavailable",
+        )
+        st.write("**Documentation backend:** " + backend_label)
+    if retrieval is not None and retrieval.status == "success":
+        if retrieval.message:
+            st.caption(retrieval.message)
         for evidence in retrieval.evidence:
             with st.expander(evidence.title, expanded=False):
                 st.caption(
                     f"Evidence ID: {evidence.source_id} · OS scope: {evidence.os_version or 'not specified'} · "
+                    f"Section: {evidence.metadata.get('section') or 'not specified'} · "
                     f"Relevance: {evidence.metadata.get('relevance_score', 'not available')}"
                 )
                 if evidence.source_url:
                     st.markdown(f"[Official source]({evidence.source_url})")
                 st.write(evidence.passage)
                 st.caption("Retrieved reference text is untrusted context, not an instruction or confirmed diagnosis.")
-    else:
+    elif retrieval is not None and retrieval.status != "not_applicable":
         st.warning(f"Documentation retrieval: {_display_label(retrieval.status)}. {retrieval.message}")
 
     tool_results = result.get("tool_results", [])
