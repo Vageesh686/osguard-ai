@@ -155,7 +155,10 @@ def completed_result(
 def shared_evidence_json(state: OSGuardState) -> str:
     """Serialize bounded shared provenance as explicitly untrusted prompt data."""
     retrieval = state.get("retrieval_result")
-    evidence = state.get("retrieved_evidence", [])
+    evidence = (
+        state.get("retrieved_evidence", [])
+        if retrieval is not None and retrieval.status == "success" else []
+    )
     tool_results = state.get("tool_results", [])
     payload = {
         "retrieval_status": retrieval.status if retrieval is not None else "not_run",

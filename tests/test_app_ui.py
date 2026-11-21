@@ -70,11 +70,32 @@ class _FakeStreamlit(ModuleType):
         return record
 
 
-def _load_app_with_fake_streamlit(monkeypatch):
+def _load_app_with_fake_streamlit(monkeypatch, *, button_returns=None):
     fake_streamlit = _FakeStreamlit()
+    fake_streamlit.button_returns.update(button_returns or {})
     monkeypatch.setitem(sys.modules, "streamlit", fake_streamlit)
     namespace = runpy.run_path(str(Path(__file__).parents[1] / "app.py"))
     return namespace["_render_supervisor_result"], fake_streamlit
+
+
+def test_initialize_documentation_prewarms_without_groq(monkeypatch):
+    from osguard.rag import retriever
+
+    calls = []
+    def prepared(query, *, top_k):
+        calls.append((query, top_k))
+        return RetrievalResult(status="success", query=query, backend="in_memory")
+
+    monkeypatch.setattr(retriever, "search_documentation", prepared)
+    _, fake_st = _load_app_with_fake_streamlit(
+        monkeypatch, button_returns={"Initialize documentation": True}
+    )
+    assert calls == [("Windows troubleshooting", 1)]
+    assert fake_st.session_state["osguard_kb_initialization"].backend == "in_memory"
+    assert any(
+        name == "success" and "In-memory fallback knowledge base is ready" in str(args)
+        for name, args, _kwargs in fake_st.calls
+    )
 
 
 def _base_result(*, specialist_status, workflow_status, message):

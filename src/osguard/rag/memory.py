@@ -112,6 +112,7 @@ def search_in_memory(
                     metadata={
                         "document_source_id": metadata["source_id"],
                         "category": metadata["category"],
+                        "os_version": metadata.get("os_version"),
                         "section": metadata.get("section"),
                         "chunk_id": metadata["chunk_id"],
                         "relevance_score": round(float(score), 4),

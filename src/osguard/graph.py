@@ -100,7 +100,11 @@ def _finding_summary(state: OSGuardState) -> str:
     hypotheses = len(state.get("diagnostic_hypotheses", []))
     command_findings = len(state.get("command_verification_findings", []))
     compatibility_findings = len(state.get("compatibility_findings", []))
-    evidence_count = len(state.get("retrieved_evidence", []))
+    retrieval = state.get("retrieval_result")
+    evidence_count = (
+        len(state.get("retrieved_evidence", []))
+        if retrieval is not None and retrieval.status == "success" else 0
+    )
     successful_tools = sum(item.status == "success" for item in state.get("tool_results", []))
     steps = len(state.get("safe_diagnostic_steps", []))
     parts: list[str] = []
@@ -137,6 +141,11 @@ def final_response_node(state: OSGuardState) -> dict[str, FinalResponse]:
     execution = state.get("execution_result")
     validation = state.get("validation_result")
     status = state.get("workflow_status", "unknown")
+    retrieval = state.get("retrieval_result")
+    has_documentation = bool(
+        retrieval is not None and retrieval.status == "success"
+        and state.get("retrieved_evidence")
+    )
     issue_category = (
         classification.problem_type if classification is not None else ProblemType.UNKNOWN
     )
@@ -157,9 +166,15 @@ def final_response_node(state: OSGuardState) -> dict[str, FinalResponse]:
         message = (
             f"Classified as {issue_category.value}. Selected specialists: {specialist_labels}. "
             f"Available output: {_finding_summary(state)}. "
-            "OSGuard used the supplied request, retrieved documentation, and the "
-            "listed read-only checks."
+            "OSGuard used the supplied request"
         )
+        if has_documentation:
+            message += " and retrieved documentation"
+        if any(item.status == "success" for item in state.get("tool_results", [])):
+            message += " and the listed read-only checks"
+        message += "."
+        if retrieval is not None and retrieval.status not in {"success", "not_applicable"}:
+            message += " No documentation passages were used."
         if execution is None or execution.status == "not_started":
             message += " It did not execute commands or perform repairs."
         if any(result.status == "failed" for result in results):
@@ -229,7 +244,7 @@ def final_response_node(state: OSGuardState) -> dict[str, FinalResponse]:
         or state.get("ieee_verification_results")
         or state.get("repair_plan")
         or (validation and validation.status != "not_started")
-        or state.get("retrieved_evidence")
+        or (has_documentation and state.get("retrieved_evidence"))
         or any(item.status == "success" for item in state.get("tool_results", []))
     )
     return {

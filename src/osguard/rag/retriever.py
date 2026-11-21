@@ -248,11 +248,17 @@ def search_documentation(
             metadata = {
                 "document_source_id": chunk["source_id"],
                 "category": chunk["category"],
+                "os_version": chunk.get("os_version"),
                 "section": chunk.get("section"),
                 "chunk_id": chunk["chunk_id"],
                 "relevance_score": round(float(score), 4),
             }
-            if any(str(metadata.get(name, "")) != value for name, value in filters.items()):
+            filter_values = {
+                "category": chunk["category"],
+                "os_version": chunk.get("os_version"),
+                "source_id": chunk["source_id"],
+            }
+            if any(str(filter_values[name]) != value for name, value in filters.items()):
                 continue
             evidence.append(
                 RetrievedEvidence(

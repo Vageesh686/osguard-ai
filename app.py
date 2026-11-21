@@ -431,6 +431,27 @@ with st.expander("OSGuard disposable demo cache"):
             st.error(inspection.message or inspection.reason_code)
 
 
+with st.expander("Documentation knowledge base"):
+    st.caption(
+        "Initialize the allowlisted Microsoft documentation before analysis. "
+        "On this device the in-memory fallback loads and embeds pages once per app process."
+    )
+    prepared = st.session_state.get("osguard_kb_initialization")
+    ready = prepared is not None and prepared.backend in {"faiss", "in_memory"}
+    if st.button("Initialize documentation", disabled=ready):
+        from osguard.rag.retriever import search_documentation
+
+        with st.spinner("Loading the documentation knowledge base..."):
+            prepared = search_documentation("Windows troubleshooting", top_k=1)
+        st.session_state["osguard_kb_initialization"] = prepared
+    if prepared is not None:
+        if ready or prepared.backend in {"faiss", "in_memory"}:
+            label = "FAISS" if prepared.backend == "faiss" else "In-memory fallback"
+            st.success(f"{label} knowledge base is ready for this app process.")
+        else:
+            st.warning(f"Documentation retrieval unavailable: {prepared.message}")
+
+
 user_request = st.text_area(
     "Describe your Windows issue",
     placeholder=(

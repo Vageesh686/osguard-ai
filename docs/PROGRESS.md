@@ -1,5 +1,67 @@
 # OSGuard AI Progress
 
+## Current milestone: Final RAG integration review — 2026-11-21
+
+**Status:** The complete live Supervisor → in-memory RAG → Diagnostic Agent
+graph ran on Python 3.14.8 with Groq and retrieved Microsoft documentation.
+FAISS remains the preferred configured backend but is blocked on this host by
+Smart App Control. No Windows security setting, repair workflow, or agent
+architecture was changed.
+
+### Changes and verification
+
+- Fixed exact `os_version` filtering in FAISS and aligned its `source_id`
+  filter with the in-memory backend. Both backends now retain the OS version
+  in evidence metadata. Fake-FAISS and in-memory regression tests cover
+  matching and nonmatching filters; native FAISS could not be exercised here.
+- The final response now mentions retrieved documentation only when retrieval
+  succeeded and evidence is present. Failed retrieval passes no passages to
+  specialists and produces no documentation claim. A LangGraph regression
+  test covers this failure path.
+- Added an explicit **Initialize documentation** Streamlit control. It warms
+  the existing process-cached in-memory index before analysis, so later
+  requests in that app process reuse document downloads and embeddings.
+  The first initialization still needs network access and local embedding
+  work; the index is not persisted between app processes.
+- A real LangGraph fixture with an allowlisted Microsoft-page HTML sample,
+  deterministic embeddings, and a mocked structured Diagnostic Agent checked
+  that the passage, evidence ID, URL, title, OS version, section, category,
+  chunk ID, and metadata reach the specialist prompt and stay attached to a
+  grounded diagnostic hypothesis. The fixture made no Groq or network calls.
+- A separate **live** read-only graph run used real Microsoft retrieval, local
+  embeddings, Groq classification, and Groq Diagnostic Agent output. The
+  warmup and graph both returned `backend=in_memory`, `status=success`.
+  The graph retained four passages; its first was
+  `windows-performance-troubleshooting#windows-performance-troubleshooting-0006`
+  from `https://learn.microsoft.com/en-us/troubleshoot/windows-server/performance/troubleshoot-performance-problems-in-windows`.
+  Diagnostic Agent status was `completed`, workflow status was
+  `specialists_completed`, and graph errors were empty. The final response
+  acknowledged retrieved documentation. This live run did not exercise
+  native FAISS or a repair.
+
+### Test results and remaining limits
+
+- Focused tests: `tests/test_rag_graph_integration.py`: **2 passed**;
+  `tests/test_rag.py`: **9 passed**; `tests/test_app_ui.py` and
+  `tests/test_phase3_graph.py`: **12 passed**. These tests use mocked
+  Groq responses and deterministic or fixture-backed retrieval.
+- One complete suite run after code changes:
+  `.\.venv\Scripts\python.exe -m pytest -q --disable-warnings
+  --log-disable=langgraph.checkpoint.serde.jsonplus`:
+  **149 passed, 1 skipped, 17 warnings** in 15.16 seconds. The skipped
+  symlink test requires Windows directory-symlink privilege (`WinError 1314`).
+- Native `faiss.dll` remains blocked by Smart App Control; its retrieval
+  behavior is covered only with the FAISS test double. The in-memory index
+  must be rebuilt after each app restart, and its first load needs access to
+  the allowlisted Microsoft pages. If retrieval fails, no citation is made.
+
+### Files changed
+
+- `src/osguard/rag/retriever.py`, `src/osguard/rag/memory.py`,
+  `src/osguard/agents/_common.py`, `src/osguard/graph.py`, `app.py`,
+  `tests/test_rag.py`, `tests/test_app_ui.py`,
+  `tests/test_rag_graph_integration.py`, `ERRORS.md`, and this report.
+
 ## Current milestone: RAG fallback for the documented FAISS policy block
 
 **Status:** FAISS remains the primary backend and is still blocked by Smart App

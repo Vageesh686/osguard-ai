@@ -199,6 +199,18 @@ def test_metadata_filters_apply_exactly_after_similarity_search(tmp_path, fake_f
         "cpu process", {"category": "storage_filesystem"}, index_dir=index_dir,
         embeddings=_FakeEmbeddings(),
     ).status == "no_results"
+    assert search_documentation(
+        "cpu process", {"os_version": "Windows 11", "source_id": "cpu-process-doc"},
+        index_dir=index_dir, embeddings=_FakeEmbeddings(),
+    ).status == "success"
+    assert search_documentation(
+        "cpu process", {"os_version": "Windows 10"},
+        index_dir=index_dir, embeddings=_FakeEmbeddings(),
+    ).status == "no_results"
+    assert search_documentation(
+        "cpu process", {"source_id": "other-doc"},
+        index_dir=index_dir, embeddings=_FakeEmbeddings(),
+    ).status == "no_results"
 
 
 def test_policy_block_uses_cached_cosine_fallback_and_preserves_provenance(tmp_path, monkeypatch):
@@ -244,6 +256,12 @@ def test_policy_block_uses_cached_cosine_fallback_and_preserves_provenance(tmp_p
     assert absent.status == "no_results"
     assert absent.backend == "in_memory"
     assert absent.evidence == []
+    assert search_documentation(
+        "CPU", {"os_version": "Windows 11", "source_id": "cpu-process-doc"}, **kwargs
+    ).status == "success"
+    assert search_documentation(
+        "CPU", {"os_version": "Windows 10"}, **kwargs
+    ).status == "no_results"
 
 
 def test_fallback_fails_without_documents_and_never_invents_evidence(tmp_path, monkeypatch):

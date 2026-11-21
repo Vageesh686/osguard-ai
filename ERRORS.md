@@ -1,5 +1,22 @@
 # Errors and Environment Blockers
 
+## Final RAG integration review — 2026-11-21
+
+- Native FAISS remains blocked by the Smart App Control policy described
+  below. The successful live graph run used `backend=in_memory`; it is not
+  evidence that `faiss.dll` can load on this host.
+- An initial live verification one-liner failed before importing OSGuard with
+  `NameError: name 'My' is not defined` because PowerShell stripped nested
+  quotation marks. A distinct PowerShell here-string invocation succeeded.
+  This was a probe invocation error, not a graph error.
+- One combined focused pytest invocation produced no output for an extended
+  period and was interrupted. The same test files were then run in smaller
+  groups and passed. The final full suite also passed with 149 tests and one
+  privilege-dependent skip.
+- A read-only `Get-CimInstance Win32_Process` process-list probe returned
+  `HRESULT 0x80041003` (Access denied). It was not needed for the RAG
+  verification and no elevated access was requested.
+
 ## Current RAG backend check — 2026-11-21
 
 - Windows Code Integrity event 3077 blocked
