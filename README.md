@@ -143,7 +143,17 @@ Is it supported by available diagnostic information?
 **Effect**
 What changes will the action make?
 
-### Controlled Repair Execution
+Every proposed recommendation receives all four structured checks. The Groq
+assessment is combined with deterministic source, intent, environment, target,
+operation, and risk rules. A missing or mismatched fact remains unknown or
+fails; a model risk label cannot override policy. Current proposals are limited
+to documented dependency mismatches with a user-reported installed version.
+`supported`, `unsupported`, and `uncertain` describe recommendation evidence
+only. High-risk, privileged, unknown, registry, deletion, driver, service,
+security, permission, and command operations are never authorized for
+execution. Phase 4 has no approval buttons or repair executor.
+
+### Controlled Repair Execution (planned; not available in Phase 4)
 
 Selected low-risk operations may be performed only after:
 - Independent verification
@@ -178,9 +188,10 @@ The target architecture consists of:
 
 Currently implemented: Supervisor, typed shared state, three specialist
 workflows, multi-specialist routing, shared FAISS retrieval, bounded read-only
-Windows tools, result aggregation, and the Streamlit evidence display. IEEE
-verification, repair eligibility, approval, repair execution, and post-repair
-validation remain planned.
+Windows tools, result aggregation, corrective recommendation proposals,
+mandatory IEEE verification, and the Streamlit evidence display. Repair
+eligibility, approval, repair execution, and post-repair validation remain
+planned.
 
 For detailed architecture and workflows, see:
 
@@ -384,15 +395,16 @@ Run the automated suite:
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-The Phase 3 suite covers mocked Supervisor/specialist routing, evidence
+The automated suite covers mocked Supervisor/specialist routing, evidence
 aggregation, retrieval ingestion and search, Windows-tool result handling,
+action proposals, all four IEEE checks, fail-closed policies, graph integration,
 and Streamlit success/failure displays. It uses deterministic fixtures; it
 does not validate native FAISS loading, fetch the live documentation corpus,
 inspect this host, or call Groq. The environment-specific results are in
 `docs/PROGRESS.md`.
 
-IEEE verification, repair approval/execution, and post-repair validation are
-not implemented yet and need their own tests in later milestones.
+Repair eligibility, user approval, repair execution, and post-repair validation
+are not implemented yet and need their own tests in later milestones.
 
 See docs/PROGRESS.md for actual implementation status
 and test results.
@@ -404,10 +416,10 @@ and test results.
 - [x] Implement three specialist agents (text analysis only; runtime unverified)
 - [x] Add FAISS RAG and curated Microsoft documentation
 - [x] Add bounded read-only Windows diagnostic tools
-- [ ] Implement IEEE verification
+- [x] Implement corrective action proposals and IEEE verification
 - [ ] Add controlled repair execution
 - [ ] Implement post-repair validation
-- [x] Add mocked Phase 3 integration coverage
+- [x] Add mocked Phase 3 and Phase 4 integration coverage
 - [ ] Verify native FAISS indexing and live Windows/Groq workflow
 - [ ] Prepare final demonstration
 
@@ -424,6 +436,12 @@ It does not aim to provide:
 - Guaranteed repair success
 - Automatic administrator-level repairs
 - Production-grade endpoint management
+
+The current Windows environment blocks FAISS's native `_swigfaiss` module
+under Application Control. The automated suite uses a deterministic FAISS test
+double, so native index construction and retrieval still need verification
+after that environment restriction is resolved. No security policy was
+bypassed.
 
 ## 14. Project Documentation
 

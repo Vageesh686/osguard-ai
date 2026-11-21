@@ -28,6 +28,8 @@ from osguard.supervisor import (
     create_supervisor_classifier,
     create_supervisor_node,
 )
+from osguard.verification.ieee import Assessor, create_ieee_verification_node
+from osguard.verification.proposals import create_action_proposal_node
 
 
 _SPECIALIST_NODES = {
@@ -118,6 +120,9 @@ def final_response_node(state: OSGuardState) -> dict[str, FinalResponse]:
     selected = list(state.get("selected_specialists", []))
     results: list[SpecialistResult] = state.get("specialist_results", [])
     errors = state.get("errors", [])
+    actions = state.get("proposed_corrective_actions", [])
+    verifications = state.get("ieee_verification_results", [])
+    proposal_summary = state.get("action_proposal_result")
     status = state.get("workflow_status", "unknown")
     issue_category = (
         classification.problem_type if classification is not None else ProblemType.UNKNOWN
@@ -144,11 +149,43 @@ def final_response_node(state: OSGuardState) -> dict[str, FinalResponse]:
         )
         if any(result.status == "failed" for result in results):
             message += " One or more specialists failed; successful results were retained."
+        if verifications:
+            counts = {
+                decision: sum(item.overall == decision for item in verifications)
+                for decision in ("supported", "unsupported", "uncertain")
+            }
+            message += (
+                " IEEE recommendation review: "
+                f"{counts['supported']} supported, {counts['unsupported']} unsupported, "
+                f"{counts['uncertain']} uncertain. These results do not authorize execution."
+            )
+        elif proposal_summary and proposal_summary.status == "no_action":
+            message += " " + proposal_summary.message
     else:
         message = (
             f"Classified as {issue_category.value}, but no specialist was selected. "
             "No findings or recommendations are available."
         )
+    if verifications:
+        verification_by_id = {item.action_id: item for item in verifications}
+        action_lines = [
+            f"{action.description}: {verification_by_id[action.action_id].overall}"
+            for action in actions[:5]
+            if action.action_id in verification_by_id
+        ]
+        if action_lines:
+            message += " Recommendations: " + "; ".join(action_lines) + "."
+        missing = list(dict.fromkeys(
+            item for verification in verifications for item in verification.missing_information
+        ))
+        if missing:
+            message += " Additional information needed: " + "; ".join(missing[:4]) + "."
+    if proposal_summary and proposal_summary.status in {"no_action", "failed"}:
+        if proposal_summary.message and proposal_summary.message not in message:
+            message += " " + proposal_summary.message
+    ieee_summary = state.get("ieee_verification_summary")
+    if ieee_summary and ieee_summary.status == "partial_failure":
+        message += " One or more IEEE model assessments failed; affected checks remain uncertain."
 
     finding_fields = (
         state.get("diagnostic_symptoms")
@@ -158,6 +195,8 @@ def final_response_node(state: OSGuardState) -> dict[str, FinalResponse]:
         or state.get("safe_diagnostic_steps")
         or state.get("command_verification_findings")
         or state.get("compatibility_findings")
+        or state.get("proposed_corrective_actions")
+        or state.get("ieee_verification_results")
         or state.get("retrieved_evidence")
         or any(item.status == "success" for item in state.get("tool_results", []))
     )
@@ -182,6 +221,8 @@ def build_supervisor_graph(
     evidence_collection_node: EvidenceNode | None = None,
     retriever: Callable[..., RetrievalResult] | None = None,
     windows_tools: Mapping[str, WindowsTool] | None = None,
+    action_proposer: Callable[[OSGuardState], Any] | None = None,
+    ieee_assessor: Assessor | None = None,
 ) -> Any:
     """Build the typed graph with one shared Groq model and injectable agents.
 
@@ -212,6 +253,14 @@ def build_supervisor_graph(
     active_evidence_node = evidence_collection_node or create_evidence_collection_node(
         retriever=retriever, windows_tools=windows_tools
     )
+    action_proposal_node = create_action_proposal_node(
+        proposer=action_proposer,
+        model_provider=model_provider,
+    )
+    ieee_verification_node = create_ieee_verification_node(
+        assessor=ieee_assessor,
+        model_provider=model_provider,
+    )
 
     graph = StateGraph(OSGuardState)
     graph.add_node("supervisor", create_supervisor_node(active_classifier))
@@ -220,6 +269,8 @@ def build_supervisor_graph(
     graph.add_node("command_verification_agent", command_node)
     graph.add_node("compatibility_agent", compatibility_node)
     graph.add_node("aggregate_findings", aggregate_findings_node)
+    graph.add_node("propose_corrective_actions", action_proposal_node)
+    graph.add_node("ieee_verification", ieee_verification_node)
     graph.add_node("final_response", final_response_node)
 
     graph.add_edge(START, "supervisor")
@@ -227,6 +278,8 @@ def build_supervisor_graph(
     graph.add_conditional_edges("collect_evidence", route_to_next_specialist)
     for node_name in _SPECIALIST_NODES.values():
         graph.add_conditional_edges(node_name, route_to_next_specialist)
-    graph.add_edge("aggregate_findings", "final_response")
+    graph.add_edge("aggregate_findings", "propose_corrective_actions")
+    graph.add_edge("propose_corrective_actions", "ieee_verification")
+    graph.add_edge("ieee_verification", "final_response")
     graph.add_edge("final_response", END)
     return graph.compile()

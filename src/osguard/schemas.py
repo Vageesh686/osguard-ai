@@ -189,17 +189,59 @@ class ToolExecutionResult(StrictModel):
     error: str | None = None
 
 
-class ProposedCorrectiveAction(StrictModel):
-    action_id: str
-    parameters: dict[str, Any] = Field(default_factory=dict)
-    rationale: str
+class CorrectiveActionCandidate(StrictModel):
+    """A recommendation candidate; it is never an executable command."""
+
+    description: str = Field(min_length=1, max_length=500)
+    intended_purpose: str = Field(min_length=1, max_length=500)
+    target_subsystem: OSSubsystem
+    operation: str = Field(min_length=1, max_length=100, pattern=r"^[a-z][a-z0-9_]*$")
+    parameters: dict[str, str | int | float | bool | None] = Field(default_factory=dict, max_length=12)
+    rationale: str = Field(min_length=1, max_length=1200)
+    evidence_ids: list[str] = Field(default_factory=list, max_length=8)
+    evidence_quotes: dict[str, str] = Field(default_factory=dict, max_length=8)
+    required_environment_conditions: list[str] = Field(default_factory=list, max_length=8)
+    potential_effects: list[str] = Field(default_factory=list, max_length=8)
+    risks: list[str] = Field(default_factory=list, max_length=8)
+    requires_administrator: Literal["yes", "no", "unknown"] = "unknown"
+    reversible: bool | None = None
+    intent_evidence_quote: str | None = Field(default=None, max_length=500)
+
+
+class ProposedCorrectiveAction(CorrectiveActionCandidate):
+    action_id: str = Field(pattern=r"^act-[a-f0-9]{16}$")
     risk: Literal["low", "medium", "high", "unknown"] = "unknown"
+
+
+class ActionProposalOutput(StrictModel):
+    """Bounded structured output from the corrective-action proposer."""
+
+    actions: list[CorrectiveActionCandidate] = Field(default_factory=list, max_length=5)
+
+
+class ActionProposalResult(StrictModel):
+    status: Literal["not_run", "proposed", "no_action", "failed"] = "not_run"
+    message: str = ""
+    candidate_count: int = 0
 
 
 class VerificationCheck(StrictModel):
     result: Literal["pass", "fail", "unknown"] = "unknown"
     rationale: str
     evidence_ids: list[str] = Field(default_factory=list)
+    reason_codes: list[str] = Field(default_factory=list)
+    missing_information: list[str] = Field(default_factory=list)
+
+
+class IEEEAssessment(StrictModel):
+    """Structured LLM review; deterministic rules remain authoritative."""
+
+    intent: VerificationCheck
+    environment: VerificationCheck
+    evidence: VerificationCheck
+    effect: VerificationCheck
+    risk: Literal["low", "medium", "high", "unknown"] = "unknown"
+    explanation: str = ""
 
 
 class IEEEVerificationResult(StrictModel):
@@ -209,7 +251,17 @@ class IEEEVerificationResult(StrictModel):
     evidence: VerificationCheck
     effect: VerificationCheck
     overall: Literal["supported", "unsupported", "uncertain"] = "uncertain"
+    risk: Literal["low", "medium", "high", "unknown"] = "unknown"
     reason_codes: list[str] = Field(default_factory=list)
+    supporting_evidence_ids: list[str] = Field(default_factory=list)
+    missing_information: list[str] = Field(default_factory=list)
+    explanation: str = ""
+
+
+class IEEEVerificationSummary(StrictModel):
+    status: Literal["not_run", "completed", "no_actions", "partial_failure"] = "not_run"
+    message: str = ""
+    result_count: int = 0
 
 
 class RepairEligibility(StrictModel):

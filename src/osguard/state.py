@@ -6,6 +6,7 @@ import operator
 from typing import Annotated, Required, TypedDict
 
 from osguard.schemas import (
+    ActionProposalResult,
     ApprovalState,
     CommandVerificationFinding,
     CompatibilityFinding,
@@ -14,6 +15,7 @@ from osguard.schemas import (
     ExecutionValidationResult,
     FinalResponse,
     IEEEVerificationResult,
+    IEEEVerificationSummary,
     OSSubsystem,
     ProblemType,
     ProposedCorrectiveAction,
@@ -27,6 +29,28 @@ from osguard.schemas import (
     ToolExecutionResult,
     WorkflowError,
 )
+
+
+def _merge_action_records(existing: list, incoming: list, key_name: str) -> list:
+    """Merge reducer-backed action records by ID, with the newest value winning."""
+    merged: dict[str, object] = {}
+    order: list[str] = []
+    for item in [*existing, *incoming]:
+        key = item.get(key_name) if isinstance(item, dict) else getattr(item, key_name, None)
+        if not isinstance(key, str) or not key:
+            continue
+        if key not in merged:
+            order.append(key)
+        merged[key] = item
+    return [merged[key] for key in order]
+
+
+def merge_corrective_actions(existing: list, incoming: list) -> list:
+    return _merge_action_records(existing, incoming, "action_id")
+
+
+def merge_ieee_results(existing: list, incoming: list) -> list:
+    return _merge_action_records(existing, incoming, "action_id")
 
 
 class OSGuardState(TypedDict, total=False):
@@ -52,10 +76,12 @@ class OSGuardState(TypedDict, total=False):
     retrieved_evidence: Annotated[list[RetrievedEvidence], operator.add]
     retrieval_result: RetrievalResult | None
     tool_results: Annotated[list[ToolExecutionResult], operator.add]
+    action_proposal_result: ActionProposalResult
     proposed_corrective_actions: Annotated[
-        list[ProposedCorrectiveAction], operator.add
+        list[ProposedCorrectiveAction], merge_corrective_actions
     ]
-    ieee_verification_results: Annotated[list[IEEEVerificationResult], operator.add]
+    ieee_verification_results: Annotated[list[IEEEVerificationResult], merge_ieee_results]
+    ieee_verification_summary: IEEEVerificationSummary
     repair_eligibility: RepairEligibility | None
     approval_state: ApprovalState | None
     execution_result: ExecutionValidationResult | None
@@ -91,8 +117,10 @@ def make_initial_state(user_request: str) -> OSGuardState:
         "retrieved_evidence": [],
         "retrieval_result": None,
         "tool_results": [],
+        "action_proposal_result": ActionProposalResult(),
         "proposed_corrective_actions": [],
         "ieee_verification_results": [],
+        "ieee_verification_summary": IEEEVerificationSummary(),
         "repair_eligibility": RepairEligibility(),
         "approval_state": ApprovalState(),
         "execution_result": ExecutionValidationResult(),

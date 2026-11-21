@@ -6,6 +6,10 @@ from pathlib import Path
 from types import ModuleType
 
 from osguard.schemas import (
+    IEEEVerificationResult,
+    IEEEVerificationSummary,
+    ProposedCorrectiveAction,
+    VerificationCheck,
     FinalResponse,
     ProblemType,
     RequestIntent,
@@ -16,6 +20,7 @@ from osguard.schemas import (
     RetrievalResult,
     SystemEnvironment,
     ToolExecutionResult,
+    OSSubsystem,
 )
 
 
@@ -193,4 +198,63 @@ def test_streamlit_ui_renders_retrieved_source_and_tool_measurement(monkeypatch)
     assert any(name == "markdown" and "learn.microsoft.com/cpu" in str(args) for name, args in rendered)
     assert any(name == "write" and "utilization_percent" in str(args) for name, args in rendered)
     assert any(name == "caption" and "measured data" in str(args).casefold() for name, args in rendered)
+
+
+def test_streamlit_ui_displays_ieee_checks_sources_and_no_execution_controls(monkeypatch):
+    render_result, fake_st = _load_app_with_fake_streamlit(monkeypatch)
+    result = _base_result(
+        specialist_status="completed",
+        workflow_status="specialists_completed",
+        message="IEEE recommendation review: 1 supported, 0 unsupported, 0 uncertain.",
+    )
+    action = ProposedCorrectiveAction(
+        action_id="act-0123456789abcdef",
+        description="Install or update Runtime to documented required version 2.0.",
+        intended_purpose="Resolve the documented Runtime mismatch.",
+        target_subsystem=OSSubsystem.SOFTWARE_DEPENDENCIES,
+        operation="install_or_update_dependency",
+        parameters={"component": "Runtime", "required_version": "2.0"},
+        rationale="The user-reported installed version is below the documented requirement.",
+        evidence_ids=["doc#chunk-1"],
+        evidence_quotes={"doc#chunk-1": "Runtime 2.0 is required for Windows 11."},
+        required_environment_conditions=["Windows 11"],
+        potential_effects=["Changes installed software."],
+        risks=["May affect applications using this runtime."],
+        requires_administrator="unknown",
+        risk="high",
+    )
+    check = VerificationCheck(
+        result="pass", rationale="The cited documented requirement supports the target version.",
+        evidence_ids=["doc#chunk-1"],
+    )
+    verification = IEEEVerificationResult(
+        action_id=action.action_id,
+        intent=check,
+        environment=check.model_copy(update={"result": "unknown", "rationale": "Admin requirement unknown."}),
+        evidence=check,
+        effect=check,
+        overall="uncertain",
+        risk="high",
+        reason_codes=["environment_prerequisite_unknown"],
+        supporting_evidence_ids=["doc#chunk-1"],
+        missing_information=["Confirm administrator requirements."],
+        explanation="This is a recommendation only.",
+    )
+    result.update({
+        "proposed_corrective_actions": [action],
+        "ieee_verification_results": [verification],
+        "ieee_verification_summary": IEEEVerificationSummary(
+            status="completed", message="One result recorded.", result_count=1
+        ),
+    })
+
+    render_result(result)
+
+    rendered = [(name, args) for name, args, _kwargs in fake_st.calls]
+    assert any(name == "subheader" and "IEEE verification" in str(args) for name, args in rendered)
+    assert any(name == "warning" and "uncertain" in str(args).casefold() for name, args in rendered)
+    assert any(name == "write" and "Runtime 2.0 is required" in str(args) for name, args in rendered)
+    assert any(name == "warning" and "administrator requirements" in str(args).casefold() for name, args in rendered)
+    button_labels = [str(args).casefold() for name, args in rendered if name == "button"]
+    assert not any("approve" in label or "execute" in label or "repair" in label for label in button_labels)
 

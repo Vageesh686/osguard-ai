@@ -210,6 +210,84 @@ def _render_supervisor_result(result):
                 if finding.missing_information:
                     st.warning("Needed: " + "; ".join(finding.missing_information))
 
+    proposal_status = result.get("action_proposal_result")
+    proposed_actions = result.get("proposed_corrective_actions", [])
+    ieee_results = result.get("ieee_verification_results", [])
+    ieee_summary = result.get("ieee_verification_summary")
+    st.subheader("Corrective recommendations — IEEE verification")
+    st.caption(
+        "Information-gathering steps are shown separately above. A supported "
+        "recommendation is not permission to execute it; OSGuard has no approval "
+        "or repair controls in this phase."
+    )
+    if not proposed_actions:
+        if proposal_status is not None:
+            st.write(proposal_status.message)
+        else:
+            st.caption("No corrective-action proposal was generated.")
+    verification_by_id = {item.action_id: item for item in ieee_results}
+    evidence_by_id = {item.source_id: item for item in result.get("retrieved_evidence", [])}
+    evidence_by_id.update({
+        item.evidence_id: item
+        for item in result.get("tool_results", [])
+        if item.evidence_id
+    })
+    for action in proposed_actions:
+        verification = verification_by_id.get(action.action_id)
+        with st.expander(action.description, expanded=True):
+            if verification is None:
+                st.error("No IEEE result was recorded for this proposed action.")
+                continue
+            badge = {
+                "supported": st.info,
+                "unsupported": st.error,
+                "uncertain": st.warning,
+            }.get(verification.overall, st.warning)
+            badge(f"Recommendation status: {_display_label(verification.overall)}")
+            st.write(f"**Deterministic risk:** {_display_label(verification.risk)}")
+            st.write(f"**Purpose:** {action.intended_purpose}")
+            st.write(f"**Target subsystem:** {_display_label(action.target_subsystem)}")
+            st.write(f"**Rationale:** {action.rationale}")
+            if action.parameters:
+                st.write("**Proposed parameters:**", action.parameters)
+            if action.required_environment_conditions:
+                st.write("**Required environment conditions:**")
+                for condition in action.required_environment_conditions:
+                    st.write(f"- {condition}")
+            st.write("**Potential effects:** " + "; ".join(action.potential_effects))
+            st.write("**Risks:** " + "; ".join(action.risks))
+            st.write(
+                "**Administrator requirement:** "
+                + _display_label(action.requires_administrator)
+            )
+            st.markdown("**IEEE checks**")
+            for name in ("intent", "environment", "evidence", "effect"):
+                check = getattr(verification, name)
+                st.write(
+                    f"{_display_label(name)}: {_display_label(check.result)} — {check.rationale}"
+                )
+                if check.reason_codes:
+                    st.caption("Reason codes: " + ", ".join(check.reason_codes))
+                if check.missing_information:
+                    st.warning("Missing: " + "; ".join(check.missing_information))
+            if action.evidence_ids:
+                st.markdown("**Supporting excerpts and sources**")
+                for evidence_id in action.evidence_ids:
+                    st.caption(f"Evidence ID: {evidence_id}")
+                    quote = action.evidence_quotes.get(evidence_id)
+                    if quote:
+                        st.write(quote)
+                    source = evidence_by_id.get(evidence_id)
+                    if source is not None and getattr(source, "source_url", None):
+                        st.markdown(f"[Source: {source.title}]({source.source_url})")
+            if verification.reason_codes:
+                st.warning("Verification reasons: " + ", ".join(verification.reason_codes))
+            if verification.missing_information:
+                st.warning("More information needed: " + "; ".join(verification.missing_information))
+            st.caption(verification.explanation)
+    if ieee_summary is not None:
+        st.caption(f"IEEE workflow: {_display_label(ieee_summary.status)} — {ieee_summary.message}")
+
     final_response = result.get("final_response")
     if final_response is not None:
         st.write(final_response.message)

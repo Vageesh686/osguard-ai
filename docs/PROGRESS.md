@@ -1,11 +1,61 @@
 # OSGuard AI Progress
 
-## Current milestone: Phase 3 — FAISS RAG and read-only Windows tools
+## Current milestone: Phase 4 — IEEE verification framework
+
+**Status:** Phase 4 implementation is complete. The focused Phase 4 tests
+passed: **39 passed, 17 warnings** in 13.63 seconds. The final full-suite run
+passed on CPython 3.14.8 (64-bit): **101 passed, 17 warnings** in 5.01 seconds.
+No live Groq request, Windows inspection, or repair was performed.
+
+### Implemented
+
+- Added typed corrective-action candidates, evidence quotes, action proposals,
+  per-action IEEE results, and explicit workflow summary states.
+- Added a bounded structured-output proposal node and a structured IEEE
+  assessment node. They reuse the graph's shared Groq model and support
+  dependency injection for deterministic tests.
+- Connected the required graph path from specialist aggregation through
+  proposal and IEEE verification to the final response; there is no graph edge
+  that skips the verification stage.
+- Added deterministic intent, environment, evidence, effect, target, and action
+  identity checks. A result is supported only when every check passes; missing
+  facts remain uncertain and prohibited/unsupported operations fail closed.
+- Kept proposals limited to evidence-backed dependency mismatches with an
+  explicitly requested remediation. The graph does not execute commands,
+  approve repairs, or modify Windows.
+- Updated Streamlit to show proposals, source excerpts, four verification
+  checks, unsupported/uncertain outcomes, and no-action/failure states without
+  presenting approval or execution controls.
+- Added focused unit, graph integration, and UI coverage using mocked models,
+  specialists, evidence, and tools. No unit test needs a live Groq API call.
+
+### Phase 4 files added or modified
+
+- Added `src/osguard/verification/__init__.py`, `proposals.py`, `rules.py`,
+  `ieee.py`, `tests/test_ieee_verification.py`, and
+  `tests/test_phase4_graph.py`.
+- Modified `src/osguard/schemas.py`, `src/osguard/state.py`,
+  `src/osguard/graph.py`, `app.py`, `tests/test_app_ui.py`, `README.md`,
+  `docs/ARCHITECTURE.md`, and this progress report.
+
+### Phase 4 limitations
+
+- Only documented dependency-version mismatches can currently produce
+  candidate recommendations. Other repair classes remain unsupported.
+- `supported` means the recommendation passed the evidence and policy checks;
+  it does not mean the operation is eligible for execution or approved.
+- Native FAISS loading remains blocked by the existing Windows Application
+  Control policy, as recorded in the Phase 3 report below. It was not bypassed.
+- No live Groq call, live corpus retrieval, host inspection, command execution,
+  repair, or user approval was performed.
+
+## Historical report: Phase 3 — FAISS RAG and read-only Windows tools
 
 **Status:** Phase 3 implementation and mocked automated coverage are complete.
-The full suite passed on CPython 3.14.8 (64-bit): **66 passed, 17 warnings**
-in 4.71 seconds. `compileall` also completed successfully. No Groq request,
-Windows inspection, documentation download, or repair was performed.
+At the time Phase 3 was completed, the full suite passed on CPython 3.14.8
+(64-bit): **66 passed, 17 warnings** in 4.71 seconds. `compileall` also
+completed successfully. No Groq request, Windows inspection, documentation
+download, or repair was performed.
 
 ### Implemented
 
@@ -60,13 +110,13 @@ Windows inspection, documentation download, or repair was performed.
   `asyncio.iscoroutinefunction`, slated for removal in Python 3.16; no test
   failures remained.
 
-### Limitations and next milestone
+### Limitations at Phase 3 completion
 
 The indexed evidence and read-only tools now flow through the existing graph,
 but native FAISS runtime verification is still blocked by Windows Application
-Control. IEEE verification, repair planning/approval/execution, and post-repair
-validation are not implemented. Phase 4 is the IEEE verification milestone;
-do not infer that repairs are available from the current UI.
+Control. IEEE verification was the next milestone at that point; it is now
+implemented. Repair planning/approval/execution and post-repair validation
+remain future work.
 
 ## Historical report: Phase 2 — Specialist Agents
 

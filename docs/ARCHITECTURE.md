@@ -2,8 +2,9 @@
 
 OSGuard preserves the Supervisor, three specialist workflows, shared typed
 state, verification gate, and controlled repair path. Phase 3 adds one shared
-evidence collection node between classification and specialist routing. IEEE
-verification and later repair components remain planned.
+evidence collection node between classification and specialist routing. Phase 4
+adds corrective-action proposals and the mandatory IEEE gate. Approval,
+execution, and post-repair validation remain planned.
 
 ## Workflow
 
@@ -22,10 +23,11 @@ flowchart TD
     C --> X
     K --> X
     X --> A[Aggregate findings and errors]
-    A --> F[Final response]
+    A --> P[Propose corrective actions]
+    P --> I[Mandatory IEEE verification]
+    I --> F[Final response]
     F --> UI[Structured Streamlit evidence display]
-    A -.-> IEEE[Mandatory IEEE gate - planned]
-    IEEE -.-> AP[Approval and restricted repair - planned]
+    I -.-> AP[Approval and restricted repair - Phase 5]
     AP -.-> V[Post-repair validation - planned]
 ```
 
@@ -42,12 +44,12 @@ untrusted context. Redaction is conservative and cannot guarantee detection of
 all sensitive information in arbitrary logs.
 
 The graph creates one configured `ChatGroq` model and reuses it for the
-Supervisor and specialist structured-output chains. The evidence collector
-runs once after classification, performs at most one FAISS lookup, and invokes
-only the relevant fixed read-only tools. It does not expose a generic tool
-calling loop. Classifier, model, retrieval function, tools, and specialist nodes
-can be injected so tests do not require Groq, the network, a local index, or
-host inspection.
+Supervisor, specialists, candidate proposal, and IEEE structured assessment.
+The evidence collector runs once after classification, performs at most one
+FAISS lookup, and invokes only the relevant fixed read-only tools. It does not
+expose a generic tool-calling loop. Classifier, model, retrieval function,
+tools, specialists, action proposer, and IEEE assessor can be injected so tests
+do not require Groq, the network, a local index, or host inspection.
 
 ## Shared state and evidence provenance
 
@@ -65,7 +67,9 @@ The state carries:
 - Static command findings and compatibility findings with validated evidence IDs.
 - Structured retrieval status, attributed passages, and bounded tool results.
 - Missing information, uncertainty, workflow errors, and specialist status.
-- Reserved IEEE, repair eligibility, approval, execution, and validation data.
+- Corrective recommendation candidates, one IEEE result per action ID, and
+  explicit no-action/error summaries. Repair eligibility remains
+  `not_evaluated`; approval, execution, and validation are reserved for later.
 
 Tool observations are accepted only when their quoted value appears in a
 successful matching tool result. Hypothesis citations are retained only when
@@ -138,6 +142,48 @@ an explicit installed version and a cited requirement with a comparison
 constraint; otherwise the result remains unknown. Installed software is not
 inventoried.
 
+## Corrective action proposals and IEEE verification
+
+After specialist aggregation, every graph path enters the action proposal node
+and then the IEEE verifier before the final response. The proposer runs only
+when the user asks for remediation and a compatibility finding reports a
+user-reported installed version that conflicts with a retrieved documented
+requirement. It asks the shared Groq model for up to five structured
+candidates. The proposal node reconstructs allowed dependency targets,
+versions, rationale, evidence excerpts, effects, risks, and risk level from the
+validated compatibility finding and retrieved source. A user-submitted
+PowerShell command is never promoted into an action. With missing evidence,
+unknown requirements, failed specialists without a usable finding, or a
+command-verification request, it records an explicit no-action result.
+
+For each candidate, Groq returns structured Intent, Environment, Evidence, and
+Effect assessments. Deterministic checks then control the final result:
+
+- **Intent:** a remediation request must be explicit, and the action must match
+  the grounded dependency finding. A command-safety request or an explicit
+  request for explanation only cannot authorize a correction.
+- **Environment:** OS version/build and architecture must match documented
+  requirements. Missing OS, architecture, prerequisite, or administrator
+  information remains unknown. An unsupported environment fails.
+- **Evidence:** every ID must exist in the current user text, a successful
+  read-only tool result, or a retrieved passage. Each excerpt must match its
+  source, the user-reported installed version must be cited, and the retrieved
+  passage must contain the required version. An existing but unrelated source
+  does not support the recommendation.
+- **Effect:** an immutable operation policy supplies risk and known effects.
+  The only currently supported proposal operation is a dependency install or
+  update recommendation, classified high risk and recommendation-only.
+  Registry, file deletion, security, driver, service, permission, command, and
+  unknown operations fail closed. Model-provided risk labels do not override
+  this policy.
+
+Overall is `supported` only when all four final checks pass, `unsupported` if
+any check fails, and otherwise `uncertain`. A stable content-derived action ID
+maps to exactly one result; reducer merges deduplicate by that ID. A supported
+result means evidence-backed as a recommendation, not safe to execute or
+authorized. Phase 4 does not calculate repair eligibility, request approval,
+execute actions, or modify Windows.
+
 ## Failure, uncertainty, and deferred components
 
 Retrieval status and tool status are stored separately from specialist errors.
@@ -145,12 +191,11 @@ Missing indexes and denied tools do not create evidence. Specialist errors are
 represented as `WorkflowError` and failed `SpecialistResult` records; other
 selected specialists can still complete and their findings are retained.
 
-Phase 3 does not execute commands or modify Windows. The following architecture
+Phase 4 does not execute commands or modify Windows. The following architecture
 components remain future work:
 
-1. The mandatory Intent, Environment, Evidence, Effect (IEEE) verification gate.
-2. Repair planning, exact per-action user approval, and a restricted executor.
-3. Post-repair validation and evidence-backed reporting.
+1. Repair planning, exact per-action user approval, and a restricted executor.
+2. Post-repair validation and evidence-backed reporting.
 
 These components must be added in implementation-guide order without changing
 the Supervisor or specialist architecture. See `docs/IMPLEMENTATION_GUIDE.md`
