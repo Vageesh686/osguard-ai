@@ -28,6 +28,7 @@ SPECIALISTS = (
     SpecialistName.COMMAND_VERIFICATION,
     SpecialistName.COMPATIBILITY,
 )
+NO_EVIDENCE = lambda _state: {}
 
 
 def _classification(selected, *, intent=RequestIntent.DIAGNOSE, problem=ProblemType.UNKNOWN):
@@ -71,6 +72,7 @@ def _run_with_stubs(request, classification, *, updates=None, model_factory=None
         classifier=lambda _request: classification,
         model_factory=model_factory,
         specialist_nodes=_stub_nodes(calls, updates),
+        evidence_collection_node=NO_EVIDENCE,
     )
     return graph.invoke(make_initial_state(request)), calls
 
@@ -195,6 +197,7 @@ def test_invalid_supervisor_output_becomes_controlled_error():
             "selected_specialists": [],
         },
         specialist_nodes=_stub_nodes(calls),
+        evidence_collection_node=NO_EVIDENCE,
     )
 
     result = graph.invoke(make_initial_state("Windows is broken"))
@@ -240,6 +243,7 @@ def test_shared_state_aggregation_preserves_existing_and_new_findings():
                 }
             },
         ),
+        evidence_collection_node=NO_EVIDENCE,
     )
     initial = make_initial_state("A Windows issue")
     initial["diagnostic_observations"] = [existing]
@@ -329,6 +333,7 @@ def test_invalid_specialist_response_is_contained_and_other_agent_runs():
         classifier=lambda _request: classification,
         model=InvalidStructuredModel(),
         specialist_nodes={SpecialistName.COMPATIBILITY: compatibility_node},
+        evidence_collection_node=NO_EVIDENCE,
     )
     result = graph.invoke(make_initial_state("My computer has high CPU usage."))
 
@@ -401,6 +406,7 @@ def test_supervisor_to_all_real_specialist_nodes_with_mocked_structured_model():
     graph = build_supervisor_graph(
         classifier=lambda _request: classification,
         model=model,
+        evidence_collection_node=NO_EVIDENCE,
     )
     request = (
         "My PC has high CPU usage. Get-Process. "

@@ -1,6 +1,20 @@
 # Errors and Environment Blockers
 
-## Confirmed: Pydantic Core blocked by Windows Application Control
+## Current check — 2026-11-21
+
+- `.venv` runs CPython 3.14.8 x64.
+- `pydantic_core` 2.50.5, `langchain_groq`, `langgraph`,
+  `sentence_transformers` 6.3.0, and `psutil` 7.2.2 imported successfully.
+- `faiss` still fails to import: `DLL load failed while importing _swigfaiss:
+  An Application Control policy has blocked this file.` No policy was changed
+  or bypassed. Native FAISS index build/load and live retrieval remain blocked.
+- `pytest -q`: 66 passed, 17 dependency deprecation warnings. Tests inject a
+  deterministic FAISS test double and do not establish native FAISS runtime
+  compatibility.
+- No live Groq request, documentation download, local embedding inference, or
+  live Windows diagnostic was performed.
+
+## Historical incident: Pydantic Core blocked by Windows Application Control
 
 The existing virtual environment cannot import `langchain_groq` because its
 dependency chain reaches the compiled Pydantic Core extension and Windows
@@ -11,9 +25,9 @@ Application Control blocks that file.
 - Policy ID: `{0283ac0f-fff1-49ae-ada1-8a933130cad6}`
 - Result: the live `ChatGroq` client cannot be loaded in this environment.
 
-This is an environment policy failure, not an error in the Groq request code.
-Do not bypass or change the host policy. Leave this blocker documented until
-the user resolves it through the device's approved process.
+This was an environment policy failure, not an error in the Groq request code.
+The block was not reproduced in the current check above; no explanation for
+that change has been established. Do not bypass or change the host policy.
 
 ## Pytest plugin import
 
@@ -28,24 +42,22 @@ The project and existing `.venv` both target CPython 3.14. The venv reports
 Python 3.14.8 (64-bit Windows). Dependency installation and the mocked test
 suite completed under that interpreter.
 
-## Compatibility check results
+## Earlier compatibility check results
 
 - Installed compatible package versions: LangGraph 1.2.23, LangChain 1.5.2,
   `langchain-groq` 1.2.1, Pydantic 2.14.4 / Pydantic Core 2.50.5, Streamlit
   1.67.0, FAISS CPU 1.16.0, and Sentence Transformers 6.3.0.
 - `langgraph` and Streamlit imports succeeded. `pip check` reported no broken
   requirements; the automated tests passed (14 tests).
-- `pydantic_core` and `langchain_groq` remain unimportable due to the confirmed
-  Application Control block. Installing compatible Python 3.14 wheels did not
-  remove this host policy restriction.
-- A post-install import sweep for FAISS and Sentence Transformers was stopped
-  before it completed. Their installed versions and dependency metadata are
-  compatible with this interpreter, but successful imports were not verified.
+- At the time of the earlier check, `pydantic_core` and `langchain_groq` were
+  unimportable due to the Application Control block. Current import results
+  are recorded at the top of this file.
+- The earlier import sweep did not verify FAISS or Sentence Transformers;
+  their current observed import results are also recorded above.
 
 ## Verification deferred
 
-- Automated tests use a fake model factory and do not import `langchain_groq`.
-- A live Groq request has not been run from this environment because the
-  provider import is blocked before the request can start.
-- After the device policy permits the native dependency to load, run the manual
-  smoke check (`python test_groq.py`) to verify the live provider path.
+- Automated tests use fake model outputs and do not make live Groq requests.
+- The Groq client imports now, but a live provider request has not been run.
+- Native FAISS loading remains blocked. Once it is permitted through the
+  device's approved process, run the index builder and verify real retrieval.

@@ -13,6 +13,7 @@ dependencies = [
     "langchain>=1.5,<2",
     "langchain-groq>=1.2,<2",
     "langgraph>=1.2,<2",
+    "psutil>=7,<8",
     "pydantic>=2.14,<3",
     "python-dotenv>=1,<2",
     "sentence-transformers>=6.3,<7",

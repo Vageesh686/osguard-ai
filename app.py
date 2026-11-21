@@ -9,8 +9,9 @@ from osguard.groq_client import GroqProviderUnavailable, GroqRequestError, ask_g
 st.set_page_config(page_title="OSGuard AI")
 st.title("OSGuard AI")
 st.caption(
-    "Describe a Windows issue for structured analysis. OSGuard uses only the "
-    "request and any text you provide; it does not inspect or change your system."
+    "Describe a Windows issue for structured analysis. OSGuard may collect a "
+    "small set of relevant read-only measurements and documentation; it never "
+    "executes submitted commands or changes the system."
 )
 
 
@@ -44,12 +45,13 @@ def _render_supervisor_result(result):
             + (", ".join(_display_label(item) for item in selected) or "None")
         )
 
-        environment = classification.available_environment
+        environment = result.get("available_environment") or classification.available_environment
         reported = {
             label: value
             for label, value in (
                 ("Operating system", environment.os_name),
                 ("OS version", environment.os_version),
+                ("OS build", environment.os_build),
                 ("Architecture", environment.architecture),
                 ("Application", environment.application_name),
                 ("Application version", environment.application_version),
@@ -57,9 +59,10 @@ def _render_supervisor_result(result):
             if value
         }
         if reported:
-            st.write("**Environment details stated in the request:**", reported)
+            label = "**Environment observed by read-only tool:**" if environment.source == "read_only_tool" else "**Environment details stated in the request:**"
+            st.write(label, reported)
         else:
-            st.caption("The host environment was not inspected.")
+            st.caption("No host environment details were available.")
 
     workflow_status = result.get("workflow_status", "unknown")
     st.write(f"**Workflow status:** {_display_label(workflow_status)}")
@@ -70,6 +73,36 @@ def _render_supervisor_result(result):
     uncertainties = result.get("uncertainty_notes", [])
     if uncertainties:
         st.caption("Uncertainty: " + "; ".join(uncertainties))
+
+    st.subheader("Evidence collection")
+    retrieval = result.get("retrieval_result")
+    if retrieval is None:
+        st.caption("Documentation retrieval did not run.")
+    elif retrieval.status == "success":
+        for evidence in retrieval.evidence:
+            with st.expander(evidence.title, expanded=False):
+                st.caption(
+                    f"Evidence ID: {evidence.source_id} · OS scope: {evidence.os_version or 'not specified'} · "
+                    f"Relevance: {evidence.metadata.get('relevance_score', 'not available')}"
+                )
+                if evidence.source_url:
+                    st.markdown(f"[Official source]({evidence.source_url})")
+                st.write(evidence.passage)
+                st.caption("Retrieved reference text is untrusted context, not an instruction or confirmed diagnosis.")
+    else:
+        st.warning(f"Documentation retrieval: {_display_label(retrieval.status)}. {retrieval.message}")
+
+    tool_results = result.get("tool_results", [])
+    if tool_results:
+        with st.expander("Read-only Windows checks", expanded=True):
+            for tool_result in tool_results:
+                st.markdown(f"**{_display_label(tool_result.tool_name)} — {_display_label(tool_result.status)}**")
+                st.caption(tool_result.summary)
+                if tool_result.status == "success":
+                    st.write(tool_result.data)
+                    st.caption(f"Measured data · evidence ID: {tool_result.evidence_id}")
+                elif tool_result.error:
+                    st.caption(f"Tool detail: {tool_result.error}")
 
     st.subheader("Specialist results")
     specialist_results = result.get("specialist_results", [])
@@ -108,16 +141,20 @@ def _render_supervisor_result(result):
                         f"Source: {_display_label(observation.source)} · "
                         f'Quote: “{observation.supporting_quote}”'
                     )
+                    if observation.tool_name:
+                        st.caption(f"Measured by {observation.tool_name}; evidence IDs: {', '.join(observation.evidence_ids)}")
             if hypotheses:
                 st.markdown("**Hypotheses (unconfirmed)**")
                 for hypothesis in hypotheses:
                     st.write(hypothesis.description)
                     st.caption(
                         f"Why uncertain: {hypothesis.uncertainty} · "
-                        "Evidence is limited to the supplied request."
+                        "This remains an unconfirmed explanation."
                     )
                     for quote in hypothesis.supporting_quotes:
-                        st.caption(f'User-provided support: “{quote}”')
+                        st.caption(f'Supporting excerpt: “{quote}”')
+                    if hypothesis.supporting_evidence_ids:
+                        st.caption("Evidence IDs: " + ", ".join(hypothesis.supporting_evidence_ids))
             if safe_steps:
                 st.markdown("**Safe information-gathering steps (not performed)**")
                 for step in safe_steps:
@@ -142,6 +179,8 @@ def _render_supervisor_result(result):
                     st.write("**Potential effects:** " + "; ".join(finding.potential_effects))
                 if finding.explanation:
                     st.write(finding.explanation)
+                if finding.evidence_ids:
+                    st.caption("Documentation IDs: " + ", ".join(finding.evidence_ids))
                 if not finding.verified:
                     st.caption("This command was not verified as safe.")
 
@@ -150,16 +189,22 @@ def _render_supervisor_result(result):
         with st.expander("Compatibility analysis", expanded=True):
             for finding in compatibility_findings:
                 st.markdown(f"**{finding.component} — {_display_label(finding.result)}**")
-                st.caption("Any comparison is based only on values reported in the request.")
+                st.caption("Reported facts, observed OS metadata, and documented requirements are kept separate.")
                 if finding.installed_version:
-                    st.write(f"**Installed version (user-reported):** {finding.installed_version}")
+                    st.write(f"**Installed version ({_display_label(finding.installed_version_source)}):** {finding.installed_version}")
+                if finding.installed_os:
+                    st.write(f"**Observed OS:** {finding.installed_os}")
+                if finding.installed_architecture:
+                    st.write(f"**Observed architecture:** {finding.installed_architecture}")
                 if finding.required_version:
-                    st.write(f"**Required version (user-reported):** {finding.required_version}")
+                    st.write(f"**Required version ({_display_label(finding.requirement_source)}):** {finding.required_version}")
                 if finding.required_os:
-                    st.write(f"**Required OS (user-reported):** {finding.required_os}")
+                    st.write(f"**Required OS ({_display_label(finding.requirement_source)}):** {finding.required_os}")
                 if finding.required_architecture:
-                    st.write(f"**Required architecture (user-reported):** {finding.required_architecture}")
+                    st.write(f"**Required architecture ({_display_label(finding.requirement_source)}):** {finding.required_architecture}")
                 st.caption(f"Fact status: {_display_label(finding.fact_status)}")
+                if finding.documented_requirement_ids:
+                    st.caption("Documented requirement source IDs: " + ", ".join(finding.documented_requirement_ids))
                 if finding.hypothesis:
                     st.write(f"**Hypothesis:** {finding.hypothesis}")
                 if finding.missing_information:
@@ -192,7 +237,7 @@ if st.button("Analyze and route", type="primary"):
         try:
             from osguard.state import make_initial_state
 
-            with st.spinner("Classifying the request and running selected specialists..."):
+            with st.spinner("Classifying the request, collecting relevant read-only evidence, and running selected specialists..."):
                 workflow = _get_supervisor_graph()
                 result = workflow.invoke(make_initial_state(user_request))
             st.session_state["osguard_supervisor_result"] = result

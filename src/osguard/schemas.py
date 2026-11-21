@@ -62,6 +62,7 @@ class SystemEnvironment(StrictModel):
     source: Literal["user_reported", "read_only_tool", "unknown"] = "unknown"
     os_name: str | None = None
     os_version: str | None = None
+    os_build: str | None = None
     architecture: str | None = None
     application_name: str | None = None
     application_version: str | None = None
@@ -88,11 +89,12 @@ class SupervisorClassification(StrictModel):
 
 
 class DiagnosticObservation(StrictModel):
-    """A quoted user-reported statement, not an independently confirmed fact."""
+    """A user report or measured read-only observation with provenance."""
 
     description: str
-    source: Literal["user_report", "user_provided_log"]
-    supporting_quote: str
+    source: Literal["user_report", "user_provided_log", "read_only_tool"]
+    supporting_quote: str = ""
+    tool_name: str | None = None
     evidence_ids: list[str] = Field(default_factory=list)
 
 
@@ -115,6 +117,7 @@ class CommandVerificationFinding(StrictModel):
     potential_effects: list[str] = Field(default_factory=list)
     requires_admin: Literal["yes", "no", "unknown"] = "unknown"
     explanation: str = ""
+    evidence_ids: list[str] = Field(default_factory=list)
     verified: bool = False
     should_execute: Literal[False] = False
 
@@ -123,14 +126,21 @@ class CompatibilityFinding(StrictModel):
     component: str
     installed_version: str | None = None
     required_version: str | None = None
+    installed_os: str | None = None
+    installed_architecture: str | None = None
     required_os: str | None = None
     required_architecture: str | None = None
     result: Literal["compatible", "incompatible", "unknown"] = "unknown"
-    fact_status: Literal["user_reported", "hypothesis", "not_established"] = (
+    fact_status: Literal[
+        "user_reported", "read_only_tool", "documented", "hypothesis", "not_established"
+    ] = (
         "not_established"
     )
+    installed_version_source: Literal["user_reported", "read_only_tool", "not_established"] = "not_established"
+    requirement_source: Literal["user_reported", "documentation", "not_established"] = "not_established"
     hypothesis: str | None = None
     evidence_ids: list[str] = Field(default_factory=list)
+    documented_requirement_ids: list[str] = Field(default_factory=list)
     missing_information: list[str] = Field(default_factory=list)
 
 
@@ -141,6 +151,42 @@ class RetrievedEvidence(StrictModel):
     os_version: str | None = None
     passage: str
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class RetrievalResult(StrictModel):
+    """Status and provenance for one bounded documentation lookup."""
+
+    status: Literal[
+        "success",
+        "empty_query",
+        "index_missing",
+        "no_results",
+        "unsupported_filters",
+        "index_corrupt",
+        "retrieval_error",
+    ]
+    query: str
+    evidence: list[RetrievedEvidence] = Field(default_factory=list)
+    message: str = ""
+    filters: dict[str, str] = Field(default_factory=dict)
+
+
+class ToolExecutionResult(StrictModel):
+    """A bounded read-only tool call; data is evidence, not an instruction."""
+
+    tool_name: str
+    status: Literal[
+        "success",
+        "invalid_input",
+        "permission_denied",
+        "unsupported_os",
+        "not_found",
+        "failed",
+    ]
+    summary: str
+    data: dict[str, Any] = Field(default_factory=dict)
+    evidence_id: str | None = None
+    error: str | None = None
 
 
 class ProposedCorrectiveAction(StrictModel):

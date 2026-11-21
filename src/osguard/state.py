@@ -19,10 +19,12 @@ from osguard.schemas import (
     ProposedCorrectiveAction,
     RepairEligibility,
     RetrievedEvidence,
+    RetrievalResult,
     SpecialistName,
     SpecialistResult,
     SupervisorClassification,
     SystemEnvironment,
+    ToolExecutionResult,
     WorkflowError,
 )
 
@@ -48,6 +50,8 @@ class OSGuardState(TypedDict, total=False):
     ]
     compatibility_findings: Annotated[list[CompatibilityFinding], operator.add]
     retrieved_evidence: Annotated[list[RetrievedEvidence], operator.add]
+    retrieval_result: RetrievalResult | None
+    tool_results: Annotated[list[ToolExecutionResult], operator.add]
     proposed_corrective_actions: Annotated[
         list[ProposedCorrectiveAction], operator.add
     ]
@@ -85,6 +89,8 @@ def make_initial_state(user_request: str) -> OSGuardState:
         "command_verification_findings": [],
         "compatibility_findings": [],
         "retrieved_evidence": [],
+        "retrieval_result": None,
+        "tool_results": [],
         "proposed_corrective_actions": [],
         "ieee_verification_results": [],
         "repair_eligibility": RepairEligibility(),

@@ -12,12 +12,14 @@ from osguard.agents.command_verify import create_command_verification_agent
 from osguard.agents.compatibility import create_compatibility_agent
 from osguard.agents.diagnostic import create_diagnostic_agent
 from osguard.config import GroqSettings
+from osguard.context import WindowsTool, create_evidence_collection_node
 from osguard.schemas import (
     FinalResponse,
     ProblemType,
     SpecialistName,
     SpecialistResult,
     SupervisorClassification,
+    RetrievalResult,
 )
 from osguard.state import OSGuardState
 from osguard.supervisor import (
@@ -34,6 +36,7 @@ _SPECIALIST_NODES = {
     SpecialistName.COMPATIBILITY: "compatibility_agent",
 }
 SpecialistNode = Callable[[OSGuardState], dict[str, Any]]
+EvidenceNode = Callable[[OSGuardState], dict[str, Any]]
 
 
 def route_to_next_specialist(
@@ -87,6 +90,8 @@ def _finding_summary(state: OSGuardState) -> str:
     hypotheses = len(state.get("diagnostic_hypotheses", []))
     command_findings = len(state.get("command_verification_findings", []))
     compatibility_findings = len(state.get("compatibility_findings", []))
+    evidence_count = len(state.get("retrieved_evidence", []))
+    successful_tools = sum(item.status == "success" for item in state.get("tool_results", []))
     steps = len(state.get("safe_diagnostic_steps", []))
     parts: list[str] = []
     if symptoms or observations or hypotheses:
@@ -98,6 +103,10 @@ def _finding_summary(state: OSGuardState) -> str:
         parts.append(f"static command review: {command_findings} finding(s)")
     if compatibility_findings:
         parts.append(f"compatibility review: {compatibility_findings} finding(s)")
+    if evidence_count:
+        parts.append(f"documentation retrieval: {evidence_count} passage(s)")
+    if successful_tools:
+        parts.append(f"read-only system checks: {successful_tools} completed")
     if steps:
         parts.append(f"{steps} safe information-gathering step(s)")
     return "; ".join(parts) if parts else "no structured findings"
@@ -130,8 +139,8 @@ def final_response_node(state: OSGuardState) -> dict[str, FinalResponse]:
         message = (
             f"Classified as {issue_category.value}. Selected specialists: {specialist_labels}. "
             f"Available output: {_finding_summary(state)}. "
-            "Analysis used only the supplied request and text; OSGuard did not inspect "
-            "the computer, execute commands, or perform repairs."
+            "OSGuard used only the supplied request, retrieved documentation, and the "
+            "listed read-only checks; it did not execute commands or perform repairs."
         )
         if any(result.status == "failed" for result in results):
             message += " One or more specialists failed; successful results were retained."
@@ -149,6 +158,8 @@ def final_response_node(state: OSGuardState) -> dict[str, FinalResponse]:
         or state.get("safe_diagnostic_steps")
         or state.get("command_verification_findings")
         or state.get("compatibility_findings")
+        or state.get("retrieved_evidence")
+        or any(item.status == "success" for item in state.get("tool_results", []))
     )
     return {
         "final_response": FinalResponse(
@@ -168,6 +179,9 @@ def build_supervisor_graph(
     model_factory: Callable[..., Any] | None = None,
     model: Any | None = None,
     specialist_nodes: Mapping[SpecialistName, SpecialistNode] | None = None,
+    evidence_collection_node: EvidenceNode | None = None,
+    retriever: Callable[..., RetrievalResult] | None = None,
+    windows_tools: Mapping[str, WindowsTool] | None = None,
 ) -> Any:
     """Build the typed graph with one shared Groq model and injectable agents.
 
@@ -195,8 +209,13 @@ def build_supervisor_graph(
     if compatibility_node is None:
         compatibility_node = create_compatibility_agent(model_provider=model_provider)
 
+    active_evidence_node = evidence_collection_node or create_evidence_collection_node(
+        retriever=retriever, windows_tools=windows_tools
+    )
+
     graph = StateGraph(OSGuardState)
     graph.add_node("supervisor", create_supervisor_node(active_classifier))
+    graph.add_node("collect_evidence", active_evidence_node)
     graph.add_node("diagnostic_agent", diagnostic_node)
     graph.add_node("command_verification_agent", command_node)
     graph.add_node("compatibility_agent", compatibility_node)
@@ -204,7 +223,8 @@ def build_supervisor_graph(
     graph.add_node("final_response", final_response_node)
 
     graph.add_edge(START, "supervisor")
-    graph.add_conditional_edges("supervisor", route_to_next_specialist)
+    graph.add_edge("supervisor", "collect_evidence")
+    graph.add_conditional_edges("collect_evidence", route_to_next_specialist)
     for node_name in _SPECIALIST_NODES.values():
         graph.add_conditional_edges(node_name, route_to_next_specialist)
     graph.add_edge("aggregate_findings", "final_response")

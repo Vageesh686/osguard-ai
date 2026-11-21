@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Mapping
 from typing import Any, TypeVar
 
@@ -138,3 +139,36 @@ def completed_result(
         status="completed",
         message=message,
     )
+
+
+def shared_evidence_json(state: OSGuardState) -> str:
+    """Serialize bounded shared provenance as explicitly untrusted prompt data."""
+    retrieval = state.get("retrieval_result")
+    evidence = state.get("retrieved_evidence", [])
+    tool_results = state.get("tool_results", [])
+    payload = {
+        "retrieval_status": retrieval.status if retrieval is not None else "not_run",
+        "retrieval_message": retrieval.message if retrieval is not None else "",
+        "documentation_passages": [
+            {
+                "evidence_id": item.source_id,
+                "title": item.title,
+                "source_url": item.source_url,
+                "os_version": item.os_version,
+                "metadata": item.metadata,
+                "passage": item.passage[:1800],
+            }
+            for item in evidence[:8]
+        ],
+        "read_only_tool_results": [
+            {
+                "tool_name": item.tool_name,
+                "status": item.status,
+                "summary": item.summary,
+                "evidence_id": item.evidence_id,
+                "data": item.data,
+            }
+            for item in tool_results[:8]
+        ],
+    }
+    return json.dumps(payload, ensure_ascii=False, default=str)[:18000]

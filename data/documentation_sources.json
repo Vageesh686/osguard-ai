@@ -1,0 +1,79 @@
+[
+  {
+    "source_id": "powershell-get-process",
+    "title": "Get-Process",
+    "url": "https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.management/get-process?view=powershell-7.6",
+    "os_version": "Windows 11 / PowerShell 7.6",
+    "category": "process_cpu"
+  },
+  {
+    "source_id": "powershell-get-service",
+    "title": "Get-Service",
+    "url": "https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.management/get-service?view=powershell-7.6",
+    "os_version": "Windows 11 / PowerShell 7.6",
+    "category": "services_startup"
+  },
+  {
+    "source_id": "powershell-get-winevent",
+    "title": "Get-WinEvent",
+    "url": "https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.diagnostics/get-winevent?view=powershell-7.6",
+    "os_version": "Windows 11 / PowerShell 7.6",
+    "category": "event_logs"
+  },
+  {
+    "source_id": "windows-event-log-functions",
+    "title": "Windows Event Log Functions",
+    "url": "https://learn.microsoft.com/en-us/windows/win32/wes/windows-event-log-functions",
+    "os_version": "Windows 11",
+    "category": "event_logs"
+  },
+  {
+    "source_id": "windows-event-log-query",
+    "title": "Querying for Events",
+    "url": "https://learn.microsoft.com/en-us/windows/win32/wes/querying-for-events",
+    "os_version": "Windows 11",
+    "category": "event_logs"
+  },
+  {
+    "source_id": "windows-performance-troubleshooting",
+    "title": "Troubleshoot performance problems in Windows",
+    "url": "https://learn.microsoft.com/en-us/troubleshoot/windows-server/performance/troubleshoot-performance-problems-in-windows",
+    "os_version": "Windows Server (guidance may differ on Windows 11)",
+    "category": "process_cpu"
+  },
+  {
+    "source_id": "windows-chkdsk",
+    "title": "chkdsk",
+    "url": "https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/chkdsk",
+    "os_version": "Windows 11",
+    "category": "storage_filesystem"
+  },
+  {
+    "source_id": "device-manager-error-codes",
+    "title": "Device Manager error codes",
+    "url": "https://learn.microsoft.com/en-us/windows-hardware/drivers/install/device-manager-error-messages",
+    "os_version": "Windows 11",
+    "category": "devices_drivers"
+  },
+  {
+    "source_id": "driver-install-troubleshooting",
+    "title": "Troubleshooting Device and Driver Installations",
+    "url": "https://learn.microsoft.com/en-us/windows-hardware/drivers/install/troubleshooting-device-and-driver-installations",
+    "os_version": "Windows 11",
+    "category": "devices_drivers"
+  },
+  {
+    "source_id": "dotnet-windows-install",
+    "title": "Install .NET on Windows",
+    "url": "https://learn.microsoft.com/en-us/dotnet/core/install/windows",
+    "os_version": "Windows 11",
+    "category": "software_dependencies"
+  },
+  {
+    "source_id": "windows-version-api",
+    "title": "GetSystemInfo function",
+    "url": "https://learn.microsoft.com/en-us/windows/win32/api/sysinfoapi/nf-sysinfoapi-getsysteminfo",
+    "os_version": "Windows 11",
+    "category": "system_configuration"
+  }
+]

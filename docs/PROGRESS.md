@@ -1,6 +1,76 @@
 # OSGuard AI Progress
 
-## Current milestone: Phase 2 — Specialist Agents
+## Current milestone: Phase 3 — FAISS RAG and read-only Windows tools
+
+**Status:** Phase 3 implementation and mocked automated coverage are complete.
+The full suite passed on CPython 3.14.8 (64-bit): **66 passed, 17 warnings**
+in 4.71 seconds. `compileall` also completed successfully. No Groq request,
+Windows inspection, documentation download, or repair was performed.
+
+### Implemented
+
+- Added typed shared retrieval and tool-result state, including reducer-backed
+  aggregation across the selected specialists.
+- Added a curated Microsoft Learn source list, HTTPS/host validation, HTML
+  cleaning, section-aware chunking, local Sentence Transformers embeddings,
+  FAISS cosine search, source metadata, checksums, bounded results, exact
+  metadata filters, and explicit missing/corrupt/error statuses.
+- Added an index builder (`python -m osguard.rag.build_index`) that persists
+  the generated index locally under gitignored `data/faiss/`. The application
+  reuses a loaded index and does not rebuild it per request.
+- Added six bounded read-only Windows checks: system information, process/CPU
+  sampling, memory, disk capacity, exact-name service status, and filtered
+  Application/System/Setup event logs. They do not invoke PowerShell, request
+  elevation, or modify Windows.
+- Added one shared evidence-collection node after Supervisor classification.
+  It performs at most one retrieval and selects only fixed tools relevant to
+  the classified problem. The three existing specialists receive the same
+  evidence snapshot and validate claims against source IDs and quoted evidence.
+- Updated Streamlit to display observed environment data, retrieval status and
+  citations, tool statuses, findings, and partial failures without inventing
+  evidence.
+- Added deterministic RAG, Windows-tool, specialist, graph, and UI coverage.
+  Tests inject fake embeddings/FAISS, tools, retrievers, and model outputs;
+  they do not call Groq or inspect the host.
+
+### Files added or modified
+
+- Added `src/osguard/context.py`, `src/osguard/rag/` modules,
+  `src/osguard/tools/windows.py`, `data/documentation_sources.json`,
+  `tests/test_rag.py`, `tests/test_windows_tools.py`,
+  `tests/test_phase3_agents.py`, and `tests/test_phase3_graph.py`.
+- Modified `src/osguard/agents/`, `src/osguard/graph.py`,
+  `src/osguard/schemas.py`, `src/osguard/state.py`, `app.py`,
+  `tests/test_app_ui.py`, `tests/test_supervisor_graph.py`, `pyproject.toml`,
+  `.gitignore`, `README.md`, and `docs/ARCHITECTURE.md`.
+
+### Verification and remaining environment blocker
+
+- `.venv` is CPython 3.14.8 x64. Direct imports of `pydantic_core` 2.50.5,
+  `langchain_groq`, and `langgraph` succeeded. `sentence_transformers` 6.3.0
+  and `psutil` 7.2.2 imported successfully.
+- Direct `import faiss` failed while loading `_swigfaiss` with
+  `ImportError: DLL load failed while importing _swigfaiss: An Application
+  Control policy has blocked this file.` No security setting was bypassed or
+  changed. The native index build/load and real retrieval path therefore remain
+  unverified; tests use a deterministic FAISS test double.
+- The corpus has not been fetched and the local embedding model has not been
+  run. No live Groq request or Windows tool sampling was performed.
+- Pytest reported 17 `langsmith` deprecation warnings for
+  `asyncio.iscoroutinefunction`, slated for removal in Python 3.16; no test
+  failures remained.
+
+### Limitations and next milestone
+
+The indexed evidence and read-only tools now flow through the existing graph,
+but native FAISS runtime verification is still blocked by Windows Application
+Control. IEEE verification, repair planning/approval/execution, and post-repair
+validation are not implemented. Phase 4 is the IEEE verification milestone;
+do not infer that repairs are available from the current UI.
+
+## Historical report: Phase 2 — Specialist Agents
+
+The following section records Phase 2 results from before Phase 3 was started.
 
 **Status:** Phase 2 specialist workflows and automated coverage are implemented.
 The full pytest suite passed on `.venv` Python 3.14.8: 41 passed, with 17

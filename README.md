@@ -74,11 +74,12 @@ A LangGraph Supervisor coordinates specialized workflows:
 - Command Verification Agent
 - Compatibility Agent
 
-Specialists receive the Supervisor classification and shared request context.
-The current Phase 2 specialists analyze user-provided text with structured Groq
-outputs. Common paths and identifiers are redacted before cloud inference;
-redaction is best-effort and not a guarantee for arbitrary logs. Shared FAISS
-evidence retrieval is planned but not yet implemented.
+Specialists receive the Supervisor classification and one shared evidence
+snapshot. Before specialists run, OSGuard performs one bounded FAISS lookup and
+selects only relevant read-only Windows checks. Diagnostic findings keep user
+reports, tool measurements, documentation citations, and hypotheses distinct.
+Common paths and identifiers are redacted before Groq inference; redaction is
+best-effort and not a guarantee for arbitrary logs.
 
 ### OS Diagnostics
 
@@ -92,8 +93,11 @@ The system is designed to investigate:
 - Software dependency issues
 - Configuration and permission errors
 
-Current diagnostic analysis is limited to symptoms and logs pasted by the user;
-it does not report live CPU, memory, disk, service, or event-log measurements.
+The diagnostic path can read a bounded process/CPU snapshot, memory, local disk
+capacity, one explicitly named Windows service, recent System or Application
+events, and basic Windows version/build/architecture. Only checks relevant to
+the Supervisor classification are selected. Access-denied and unsupported
+results remain explicit; no administrator privileges are requested.
 
 ### Command Verification
 
@@ -110,8 +114,15 @@ remain unverified.
 
 ### Retrieval-Augmented Generation
 
-FAISS retrieval from trusted operating system documentation is planned, but is
-not implemented in the current milestone.
+The shared FAISS index uses a curated allowlist of official Microsoft Learn
+sources in `data/documentation_sources.json`. It stores title, URL, Windows
+scope, category, section, chunk ID, passage, and relevance score. Retrieved
+text is untrusted reference material and cannot authorize commands or establish
+a diagnosis by itself.
+
+The index is built locally with Sentence Transformers embeddings. No embedding
+service is called. The application returns an explicit unavailable status when
+the index has not been built or cannot be loaded.
 
 Generate explanations that distinguish supporting evidence
 from possible diagnostic hypotheses.
@@ -165,10 +176,11 @@ The target architecture consists of:
 10. Post-Repair Validation
 11. Final Report Generator
 
-Currently implemented: Supervisor, typed shared state, three text-analysis
-specialists, multi-specialist routing, result aggregation, and the Streamlit
-results display. RAG, live Windows tools, IEEE verification, approval, repair,
-and post-repair validation remain planned.
+Currently implemented: Supervisor, typed shared state, three specialist
+workflows, multi-specialist routing, shared FAISS retrieval, bounded read-only
+Windows tools, result aggregation, and the Streamlit evidence display. IEEE
+verification, repair eligibility, approval, repair execution, and post-repair
+validation remain planned.
 
 For detailed architecture and workflows, see:
 
@@ -227,7 +239,8 @@ Install the project and its test dependencies from `pyproject.toml`:
 ```
 
 The project dependency set includes LangGraph, LangChain, `langchain-groq`,
-Pydantic, FAISS CPU, Sentence Transformers, Streamlit, and dotenv support.
+Pydantic, FAISS CPU, Sentence Transformers, psutil, Streamlit, and dotenv
+support.
 
 ## 7. Environment Configuration
 
@@ -251,9 +264,21 @@ checked against Groq's current documentation.
 ## 8. Running OSGuard AI
 
 The main Streamlit screen accepts a Windows issue, asks Groq for structured
-classification and selected specialist analyses, and displays their findings.
-Specialists use a redacted copy of supplied text: they do not inspect the host,
-execute commands, or perform repairs. Configure `.env` and run it locally:
+classification and selected specialist analyses, and displays real read-only
+measurements and retrieved documentation where available. It never executes
+submitted commands or performs repairs. Configure `.env` and build the local
+documentation index once:
+
+```powershell
+.\.venv\Scripts\python.exe -m osguard.rag.build_index
+```
+
+Index construction fetches only the Microsoft URLs listed in
+`data/documentation_sources.json` and uses local Sentence Transformers
+embeddings. The first build needs network access to those sources and may
+download the embedding model. Later requests reuse the persisted `data/faiss/`
+index instead of rebuilding it. The generated index is local and gitignored.
+Then start Streamlit:
 
 ```powershell
 .\.venv\Scripts\python.exe -m streamlit run app.py --server.address 127.0.0.1
@@ -269,9 +294,9 @@ For an explicit one-off live provider smoke check:
 .\.venv\Scripts\python.exe test_groq.py
 ```
 
-The Groq connection check is available in a separate expander. No automated
-tests or live Groq calls were run for the current Phase 2 implementation; see
-`docs/PROGRESS.md` for the recorded status.
+The Groq connection check is available in a separate expander. Automated unit
+tests use deterministic fixtures and do not send live Groq requests. See
+`docs/PROGRESS.md` for exact test and environment results.
 
 The application is intended to run locally.
 No deployment is required.
@@ -285,10 +310,10 @@ User:
 
 Current behavior:
 1. Supervisor classifies the request and selects Diagnostic Agent.
-2. Diagnostic Agent extracts quoted symptoms and returns hypotheses clearly
-   marked as unconfirmed.
-3. It may suggest safe information-gathering steps, but does not measure CPU or
-   inspect running processes.
+2. OSGuard collects a short process/CPU sample and retrieves up to four relevant
+   documentation passages when a local index exists.
+3. Diagnostic Agent separates the reported symptom from measured values and
+   unconfirmed hypotheses. High CPU use alone is not treated as a root cause.
 
 ### Scenario 2: Unsafe PowerShell Command
 
@@ -313,9 +338,10 @@ Current behavior:
 
 ### Scenario 4: Application crashes after a Windows update
 
-The Supervisor selects both Diagnostic and Compatibility Agents. Their
-structured findings are merged into shared state. Missing evidence and agent
-errors are surfaced; an uncertain result is not presented as a confirmed cause.
+The Supervisor selects both Diagnostic and Compatibility Agents. OSGuard shares
+retrieved documentation, basic Windows metadata, and relevant read-only
+measurements across both agents. Missing evidence and agent errors are surfaced;
+an uncertain result is not presented as a confirmed cause.
 
 ### Future scenario: User-Approved Repair
 
@@ -352,22 +378,21 @@ Read-only investigation is preferred by default.
 
 ## 11. Testing
 
-Run:
+Run the automated suite:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q
 ```
 
-Planned test coverage should include:
-- Agent routing
-- Structured output validation
-- RAG retrieval
-- Diagnostic tools
-- IEEE verification
-- Unsafe-action rejection
-- User approval
-- Restricted repair execution
-- Post-repair validation
+The Phase 3 suite covers mocked Supervisor/specialist routing, evidence
+aggregation, retrieval ingestion and search, Windows-tool result handling,
+and Streamlit success/failure displays. It uses deterministic fixtures; it
+does not validate native FAISS loading, fetch the live documentation corpus,
+inspect this host, or call Groq. The environment-specific results are in
+`docs/PROGRESS.md`.
+
+IEEE verification, repair approval/execution, and post-repair validation are
+not implemented yet and need their own tests in later milestones.
 
 See docs/PROGRESS.md for actual implementation status
 and test results.
@@ -377,12 +402,13 @@ and test results.
 - [ ] Initialize project structure and Groq integration
 - [x] Implement Supervisor and shared LangGraph state
 - [x] Implement three specialist agents (text analysis only; runtime unverified)
-- [ ] Add FAISS RAG
-- [ ] Add read-only Windows diagnostic tools
+- [x] Add FAISS RAG and curated Microsoft documentation
+- [x] Add bounded read-only Windows diagnostic tools
 - [ ] Implement IEEE verification
 - [ ] Add controlled repair execution
 - [ ] Implement post-repair validation
-- [ ] Complete end-to-end testing
+- [x] Add mocked Phase 3 integration coverage
+- [ ] Verify native FAISS indexing and live Windows/Groq workflow
 - [ ] Prepare final demonstration
 
 Update this checklist as features are implemented.
