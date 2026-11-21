@@ -10,8 +10,8 @@ st.set_page_config(page_title="OSGuard AI")
 st.title("OSGuard AI")
 st.caption(
     "Describe a Windows issue for structured analysis. OSGuard may collect a "
-    "small set of relevant read-only measurements and documentation; it never "
-    "executes submitted commands or changes the system."
+    "small set of relevant read-only measurements and documentation. The only "
+    "available repair clears an explicitly approved OSGuard demo-app cache."
 )
 
 
@@ -19,8 +19,9 @@ st.caption(
 def _get_supervisor_graph():
     """Cache one graph/model instance instead of creating clients per rerun."""
     from osguard.graph import build_supervisor_graph
+    from langgraph.checkpoint.memory import InMemorySaver
 
-    return build_supervisor_graph()
+    return build_supervisor_graph(checkpointer=InMemorySaver())
 
 
 def _display_label(value):
@@ -217,8 +218,8 @@ def _render_supervisor_result(result):
     st.subheader("Corrective recommendations — IEEE verification")
     st.caption(
         "Information-gathering steps are shown separately above. A supported "
-        "recommendation is not permission to execute it; OSGuard has no approval "
-        "or repair controls in this phase."
+        "recommendation is not permission to execute it. Only the predefined "
+        "OSGuard demo cache operation can become eligible for approval."
     )
     if not proposed_actions:
         if proposal_status is not None:
@@ -288,6 +289,58 @@ def _render_supervisor_result(result):
     if ieee_summary is not None:
         st.caption(f"IEEE workflow: {_display_label(ieee_summary.status)} — {ieee_summary.message}")
 
+    eligibility = result.get("repair_eligibility")
+    eligibility_results = result.get("repair_eligibility_results", [])
+    plan = result.get("repair_plan")
+    approval = result.get("approval_state")
+    execution = result.get("execution_result")
+    validation = result.get("validation_result")
+    st.subheader("Controlled OSGuard demo repair")
+    st.caption("The registered operation changes only the disposable OSGuard demo cache. No arbitrary Windows repair is available.")
+    for decision in eligibility_results:
+        st.write(f"**Action {decision.action_id}:** {_display_label(decision.status)}")
+        if decision.message:
+            st.caption(decision.message)
+        if decision.reason_codes:
+            st.caption("Eligibility reasons: " + ", ".join(decision.reason_codes))
+    if plan is not None:
+        st.write(f"**Workflow:** {_display_label(result.get('workflow_status', 'unknown'))}")
+        st.write(f"**Exact action:** {plan.executable_action_id}")
+        st.write(f"**Target:** {plan.target}")
+        st.write("**Validated parameters:**", plan.parameters)
+        st.write(f"**Reason and intended outcome:** {plan.intended_outcome}")
+        st.write("**Expected effect:** " + "; ".join(plan.expected_effects))
+        st.write("**Potential risk:** " + "; ".join(plan.potential_risks))
+        st.write("**Preconditions:** " + "; ".join(plan.preconditions))
+        st.write(f"**Post-repair validation:** {plan.validator_id}")
+        st.caption(f"Plan ID: {plan.plan_id}; fingerprint: {plan.fingerprint}")
+        if eligibility:
+            st.write(f"**Eligibility:** {_display_label(eligibility.status)}")
+        verification = verification_by_id.get(plan.action_id)
+        if verification:
+            st.write("**IEEE summary:** " + ", ".join(
+                f"{name}={getattr(verification, name).result}"
+                for name in ("intent", "environment", "evidence", "effect")
+            ))
+    if approval and approval.status != "not_requested":
+        st.write(f"**Approval:** {_display_label(approval.status)}")
+        if approval.reason_codes:
+            st.warning("Approval reasons: " + ", ".join(approval.reason_codes))
+    if execution and execution.status != "not_started":
+        st.write(f"**Execution:** {_display_label(execution.status)}")
+        if execution.details:
+            st.caption(execution.details)
+        if execution.reason_codes:
+            st.warning("Execution reasons: " + ", ".join(execution.reason_codes))
+    if validation and validation.status != "not_started":
+        status_display = st.success if validation.status == "resolved" else st.warning
+        status_display(f"Post-repair outcome: {_display_label(validation.status)}")
+        st.write(validation.details)
+        if validation.evidence:
+            st.caption("Validation evidence: " + ", ".join(validation.evidence))
+        if validation.reason_codes:
+            st.caption("Validation reasons: " + ", ".join(validation.reason_codes))
+
     final_response = result.get("final_response")
     if final_response is not None:
         st.write(final_response.message)
@@ -296,6 +349,70 @@ def _render_supervisor_result(result):
 
     for error in result.get("errors", []):
         st.error(error.message)
+
+
+def _store_graph_result(workflow, result, thread_id):
+    """Keep the checkpoint cursor only while an exact plan is awaiting input."""
+    if result.get("__interrupt__"):
+        config = {"configurable": {"thread_id": thread_id}}
+        st.session_state["osguard_supervisor_result"] = dict(workflow.get_state(config).values)
+        st.session_state["osguard_pending_thread_id"] = thread_id
+    else:
+        st.session_state["osguard_supervisor_result"] = result
+        st.session_state.pop("osguard_pending_thread_id", None)
+
+
+def _render_approval_controls(result):
+    """Only a pending, eligible, checkpointed plan receives decision buttons."""
+    plan = result.get("repair_plan")
+    eligibility = result.get("repair_eligibility")
+    approval = result.get("approval_state")
+    thread_id = st.session_state.get("osguard_pending_thread_id")
+    if not (
+        plan is not None and eligibility is not None and eligibility.status == "eligible"
+        and approval is not None and approval.status == "pending"
+        and thread_id and approval.plan_id == plan.plan_id
+        and approval.fingerprint == plan.fingerprint
+    ):
+        return
+    st.warning("This is a real change to the disposable OSGuard demo cache. Review the exact plan above before deciding.")
+    decision = None
+    if st.button("APPROVE", type="primary", key=f"approve_{plan.plan_id}"):
+        decision = "approve"
+    if st.button("DECLINE", key=f"decline_{plan.plan_id}"):
+        decision = "decline"
+    if decision is None:
+        return
+    from langgraph.types import Command
+
+    # Consume the UI cursor before resuming; a rerun cannot submit it again.
+    st.session_state.pop("osguard_pending_thread_id", None)
+    payload = {
+        "decision": decision,
+        "plan_id": plan.plan_id,
+        "fingerprint": plan.fingerprint,
+    }
+    try:
+        workflow = _get_supervisor_graph()
+        config = {"configurable": {"thread_id": thread_id}}
+        with st.spinner("Resuming the exact approval decision and validating the result..."):
+            resumed = workflow.invoke(Command(resume=payload), config=config)
+        _store_graph_result(workflow, resumed, thread_id)
+        st.rerun()
+    except Exception as exc:
+        st.error(f"The approval workflow stopped ({type(exc).__name__}). No automatic retry will occur.")
+
+
+with st.expander("OSGuard disposable demo cache"):
+    st.caption("Creates only OSGuard-owned disposable fixture data under this project's data/demo_app/cache directory. Use this to demonstrate the single approved repair.")
+    if st.button("Prepare disposable demo cache"):
+        from osguard.repair.demo_cache import DemoCacheStore
+
+        inspection = DemoCacheStore().prepare_fixture()
+        if inspection.status == "ready":
+            st.success(inspection.message)
+        else:
+            st.error(inspection.message or inspection.reason_code)
 
 
 user_request = st.text_area(
@@ -312,13 +429,19 @@ if st.button("Analyze and route", type="primary"):
         st.warning("Enter a short description of the Windows issue first.")
     else:
         st.session_state.pop("osguard_supervisor_result", None)
+        st.session_state.pop("osguard_pending_thread_id", None)
         try:
+            from uuid import uuid4
             from osguard.state import make_initial_state
 
             with st.spinner("Classifying the request, collecting relevant read-only evidence, and running selected specialists..."):
                 workflow = _get_supervisor_graph()
-                result = workflow.invoke(make_initial_state(user_request))
-            st.session_state["osguard_supervisor_result"] = result
+                thread_id = uuid4().hex
+                result = workflow.invoke(
+                    make_initial_state(user_request),
+                    config={"configurable": {"thread_id": thread_id}},
+                )
+            _store_graph_result(workflow, result, thread_id)
         except Exception as exc:
             if "Application Control policy has blocked this file" in str(exc):
                 st.error(
@@ -332,7 +455,9 @@ if st.button("Analyze and route", type="primary"):
                 )
 
 if "osguard_supervisor_result" in st.session_state:
-    _render_supervisor_result(st.session_state["osguard_supervisor_result"])
+    current_result = st.session_state["osguard_supervisor_result"]
+    _render_supervisor_result(current_result)
+    _render_approval_controls(current_result)
 
 with st.expander("Groq connection check"):
     st.caption("Sends a fixed test prompt to Groq; it does not inspect Windows.")

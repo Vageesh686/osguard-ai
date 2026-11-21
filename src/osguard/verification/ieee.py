@@ -17,6 +17,7 @@ from osguard.schemas import (
     IEEEVerificationResult,
     IEEEVerificationSummary,
     ProposedCorrectiveAction,
+    VerificationCheck,
     WorkflowError,
 )
 from osguard.state import OSGuardState
@@ -131,6 +132,17 @@ def create_ieee_verification_node(
                 if assessor is not None:
                     raw = assessor(state, action)
                     assessment = raw if isinstance(raw, IEEEAssessment) else IEEEAssessment.model_validate(raw)
+                elif action.operation == "clear_osguard_demo_cache":
+                    # This local fixture has exact, independently checkable
+                    # facts. No Groq assessment is needed to authorize it.
+                    check = VerificationCheck(
+                        result="pass",
+                        rationale="Local deterministic demo-cache inspection and policy are authoritative.",
+                    )
+                    assessment = IEEEAssessment(
+                        intent=check, environment=check, evidence=check, effect=check,
+                        risk="low",
+                    )
                 elif invoke is not None and index < MAX_LLM_ASSESSMENTS:
                     raw = invoke({
                         "request": redact_sensitive_text(state.get("user_request", ""))[:4000],

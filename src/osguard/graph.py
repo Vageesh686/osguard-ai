@@ -13,9 +13,17 @@ from osguard.agents.compatibility import create_compatibility_agent
 from osguard.agents.diagnostic import create_diagnostic_agent
 from osguard.config import GroqSettings
 from osguard.context import WindowsTool, create_evidence_collection_node
+from osguard.repair.approval import create_approval_node
+from osguard.repair.demo_cache import DEMO_TOOL_NAME, DemoCacheStore, is_exact_demo_request
+from osguard.repair.eligibility import create_repair_planning_node
+from osguard.repair.executor import ExecutionLedger, create_restricted_executor_node
+from osguard.repair.validation import create_post_repair_validation_node
 from osguard.schemas import (
+    ApprovalState,
     FinalResponse,
+    OSSubsystem,
     ProblemType,
+    RequestIntent,
     SpecialistName,
     SpecialistResult,
     SupervisorClassification,
@@ -123,6 +131,11 @@ def final_response_node(state: OSGuardState) -> dict[str, FinalResponse]:
     actions = state.get("proposed_corrective_actions", [])
     verifications = state.get("ieee_verification_results", [])
     proposal_summary = state.get("action_proposal_result")
+    eligibility = state.get("repair_eligibility")
+    plan = state.get("repair_plan")
+    approval = state.get("approval_state")
+    execution = state.get("execution_result")
+    validation = state.get("validation_result")
     status = state.get("workflow_status", "unknown")
     issue_category = (
         classification.problem_type if classification is not None else ProblemType.UNKNOWN
@@ -144,9 +157,11 @@ def final_response_node(state: OSGuardState) -> dict[str, FinalResponse]:
         message = (
             f"Classified as {issue_category.value}. Selected specialists: {specialist_labels}. "
             f"Available output: {_finding_summary(state)}. "
-            "OSGuard used only the supplied request, retrieved documentation, and the "
-            "listed read-only checks; it did not execute commands or perform repairs."
+            "OSGuard used the supplied request, retrieved documentation, and the "
+            "listed read-only checks."
         )
+        if execution is None or execution.status == "not_started":
+            message += " It did not execute commands or perform repairs."
         if any(result.status == "failed" for result in results):
             message += " One or more specialists failed; successful results were retained."
         if verifications:
@@ -186,6 +201,21 @@ def final_response_node(state: OSGuardState) -> dict[str, FinalResponse]:
     ieee_summary = state.get("ieee_verification_summary")
     if ieee_summary and ieee_summary.status == "partial_failure":
         message += " One or more IEEE model assessments failed; affected checks remain uncertain."
+    if plan is not None and eligibility and eligibility.status == "eligible":
+        if approval and approval.status == "declined":
+            message += " The exact demo-cache repair was declined; no repair ran."
+        elif approval and approval.status == "expired":
+            message += " Approval was missing, stale, or mismatched; no repair ran."
+        elif approval and approval.status == "not_requested":
+            message += " A checkpointed approval session is required before this plan can run."
+        elif execution and execution.status == "succeeded":
+            message += " The approved OSGuard demo-cache handler ran."
+        elif execution and execution.status in {"failed", "blocked", "already_executed"}:
+            message += f" Demo-cache execution status: {execution.status}."
+    elif actions:
+        message += " These actions remain recommendation only; no repair is eligible."
+    if validation and validation.status != "not_started":
+        message += f" Post-repair validation: {validation.status}. {validation.details}"
 
     finding_fields = (
         state.get("diagnostic_symptoms")
@@ -197,6 +227,8 @@ def final_response_node(state: OSGuardState) -> dict[str, FinalResponse]:
         or state.get("compatibility_findings")
         or state.get("proposed_corrective_actions")
         or state.get("ieee_verification_results")
+        or state.get("repair_plan")
+        or (validation and validation.status != "not_started")
         or state.get("retrieved_evidence")
         or any(item.status == "success" for item in state.get("tool_results", []))
     )
@@ -223,6 +255,9 @@ def build_supervisor_graph(
     windows_tools: Mapping[str, WindowsTool] | None = None,
     action_proposer: Callable[[OSGuardState], Any] | None = None,
     ieee_assessor: Assessor | None = None,
+    repair_store: DemoCacheStore | None = None,
+    execution_ledger: ExecutionLedger | None = None,
+    checkpointer: Any | None = None,
 ) -> Any:
     """Build the typed graph with one shared Groq model and injectable agents.
 
@@ -237,12 +272,39 @@ def build_supervisor_graph(
     )
     active_classifier = classifier
     if active_classifier is None:
-        active_classifier = create_supervisor_classifier(model=model_provider())
+        live_classifier: Classifier | None = None
+
+        def classify(request: str):
+            nonlocal live_classifier
+            if is_exact_demo_request(request):
+                return SupervisorClassification(
+                    intent=RequestIntent.DIAGNOSE,
+                    problem_type=ProblemType.STORAGE,
+                    os_subsystems=[OSSubsystem.STORAGE_FILESYSTEM],
+                    selected_specialists=[SpecialistName.DIAGNOSTIC],
+                    routing_rationale="Exact OSGuard demo-cache request; use the fixed local inspection.",
+                )
+            if live_classifier is None:
+                live_classifier = create_supervisor_classifier(model=model_provider())
+            return live_classifier(request)
+
+        active_classifier = classify
 
     injected_nodes = specialist_nodes or {}
     diagnostic_node = injected_nodes.get(SpecialistName.DIAGNOSTIC)
     if diagnostic_node is None:
-        diagnostic_node = create_diagnostic_agent(model_provider=model_provider)
+        live_diagnostic = create_diagnostic_agent(model_provider=model_provider)
+
+        def diagnostic_node(state: OSGuardState) -> dict[str, Any]:
+            if is_exact_demo_request(state.get("user_request", "")):
+                return {
+                    "specialist_results": [SpecialistResult(
+                        specialist=SpecialistName.DIAGNOSTIC, status="completed",
+                        message="The exact demo request was checked using the dedicated read-only cache inspection.",
+                    )],
+                    "completed_specialists": [SpecialistName.DIAGNOSTIC],
+                }
+            return live_diagnostic(state)
     command_node = injected_nodes.get(SpecialistName.COMMAND_VERIFICATION)
     if command_node is None:
         command_node = create_command_verification_agent(model_provider=model_provider)
@@ -250,8 +312,12 @@ def build_supervisor_graph(
     if compatibility_node is None:
         compatibility_node = create_compatibility_agent(model_provider=model_provider)
 
+    active_store = repair_store or DemoCacheStore()
+    active_ledger = execution_ledger or ExecutionLedger()
+    active_tools = dict(windows_tools or {})
+    active_tools.setdefault(DEMO_TOOL_NAME, active_store.tool_result)
     active_evidence_node = evidence_collection_node or create_evidence_collection_node(
-        retriever=retriever, windows_tools=windows_tools
+        retriever=retriever, windows_tools=active_tools
     )
     action_proposal_node = create_action_proposal_node(
         proposer=action_proposer,
@@ -271,6 +337,24 @@ def build_supervisor_graph(
     graph.add_node("aggregate_findings", aggregate_findings_node)
     graph.add_node("propose_corrective_actions", action_proposal_node)
     graph.add_node("ieee_verification", ieee_verification_node)
+    planning_node = create_repair_planning_node(active_store)
+    if checkpointer is None:
+        def no_checkpoint_planning(state: OSGuardState) -> dict[str, Any]:
+            update = planning_node(state)
+            if update.get("repair_plan") is not None:
+                plan = update["repair_plan"]
+                update["approval_state"] = ApprovalState(
+                    status="not_requested", action_id=plan.action_id, plan_id=plan.plan_id,
+                    reason_codes=["checkpoint_unavailable"],
+                )
+                update["workflow_status"] = "approval_unavailable"
+            return update
+        graph.add_node("repair_planning", no_checkpoint_planning)
+    else:
+        graph.add_node("repair_planning", planning_node)
+    graph.add_node("approval_interrupt", create_approval_node(active_store))
+    graph.add_node("restricted_executor", create_restricted_executor_node(active_store, active_ledger))
+    graph.add_node("post_repair_validation", create_post_repair_validation_node(active_store))
     graph.add_node("final_response", final_response_node)
 
     graph.add_edge(START, "supervisor")
@@ -280,6 +364,24 @@ def build_supervisor_graph(
         graph.add_conditional_edges(node_name, route_to_next_specialist)
     graph.add_edge("aggregate_findings", "propose_corrective_actions")
     graph.add_edge("propose_corrective_actions", "ieee_verification")
-    graph.add_edge("ieee_verification", "final_response")
+    graph.add_edge("ieee_verification", "repair_planning")
+    def route_after_planning(state: OSGuardState) -> Literal["approval_interrupt", "final_response"]:
+        return "approval_interrupt" if (
+            checkpointer is not None
+            and state.get("repair_plan") is not None
+            and state.get("repair_eligibility") is not None
+            and state["repair_eligibility"].status == "eligible"
+        ) else "final_response"
+
+    def route_after_approval(state: OSGuardState) -> Literal["restricted_executor", "final_response"]:
+        return "restricted_executor" if (
+            state.get("approval_state") is not None
+            and state["approval_state"].status == "approved"
+        ) else "final_response"
+
+    graph.add_conditional_edges("repair_planning", route_after_planning)
+    graph.add_conditional_edges("approval_interrupt", route_after_approval)
+    graph.add_edge("restricted_executor", "post_repair_validation")
+    graph.add_edge("post_repair_validation", "final_response")
     graph.add_edge("final_response", END)
-    return graph.compile()
+    return graph.compile(checkpointer=checkpointer)

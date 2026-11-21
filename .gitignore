@@ -5,6 +5,7 @@ __pycache__/
 *.pyc
 *.egg-info/
 data/faiss/
+data/demo_app/
 build/
 dist/
 .streamlit/secrets.toml

@@ -18,6 +18,7 @@ from osguard.schemas import (
     ActionProposalOutput,
     ActionProposalResult,
     CompatibilityFinding,
+    CorrectiveActionCandidate,
     OSSubsystem,
     ProblemType,
     ProposedCorrectiveAction,
@@ -26,6 +27,14 @@ from osguard.schemas import (
     WorkflowError,
 )
 from osguard.state import OSGuardState
+from osguard.repair.demo_cache import (
+    DEMO_CACHE_ID,
+    DEMO_EVIDENCE_ID,
+    DEMO_PAYLOAD,
+    DEMO_TOOL_NAME,
+    OWNER_MARKER,
+    explicit_demo_request_quote,
+)
 from osguard.verification.rules import KNOWN_RECOMMENDATION_OPERATIONS
 
 
@@ -72,6 +81,61 @@ def action_id_for(candidate: Mapping[str, Any] | Any) -> str:
     payload.pop("risk", None)
     canonical = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
     return "act-" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+
+
+def _demo_candidate(state: OSGuardState) -> CorrectiveActionCandidate | None:
+    """Build the one trusted local candidate from a direct request and inspection."""
+    classification = state.get("classification")
+    if (
+        classification is None
+        or classification.needs_clarification
+        or classification.intent == RequestIntent.VERIFY_COMMAND
+        or classification.problem_type == ProblemType.COMMAND_SAFETY
+        or SpecialistName.DIAGNOSTIC not in state.get("selected_specialists", [])
+        or SpecialistName.COMMAND_VERIFICATION in state.get("selected_specialists", [])
+        or state.get("command_verification_findings")
+        or not any(
+            item.specialist == SpecialistName.DIAGNOSTIC and item.status == "completed"
+            for item in state.get("specialist_results", [])
+        )
+    ):
+        return None
+    request = redact_sensitive_text(state.get("user_request", ""))
+    quote = explicit_demo_request_quote(request)
+    if quote is None or any(term in request.casefold() for term in (
+        "do not clear", "don't clear", "never clear", "only explain", "just explain"
+    )):
+        return None
+    for tool in state.get("tool_results", []):
+        if not (
+            tool.tool_name == DEMO_TOOL_NAME
+            and tool.status == "success"
+            and tool.evidence_id == DEMO_EVIDENCE_ID
+            and tool.data.get("cache_id") == DEMO_CACHE_ID
+            and tool.data.get("cache_status") == "ready"
+            and tool.data.get("payload_bytes") == len(DEMO_PAYLOAD)
+            and tool.data.get("payload_sha256") == hashlib.sha256(DEMO_PAYLOAD).hexdigest()
+            and tool.data.get("owner_marker_sha256") == hashlib.sha256(OWNER_MARKER).hexdigest()
+        ):
+            continue
+        policy = KNOWN_RECOMMENDATION_OPERATIONS["clear_osguard_demo_cache"]
+        return CorrectiveActionCandidate(
+            description="Clear the disposable OSGuard demo cache.",
+            intended_purpose="Resolve the reported nonempty OSGuard demo cache.",
+            target_subsystem=OSSubsystem.STORAGE_FILESYSTEM,
+            operation="clear_osguard_demo_cache",
+            parameters={"cache_id": DEMO_CACHE_ID},
+            rationale="A read-only inspection found disposable data in the owned OSGuard demo cache.",
+            evidence_ids=["user_request_redacted", DEMO_EVIDENCE_ID],
+            evidence_quotes={"user_request_redacted": quote, DEMO_EVIDENCE_ID: tool.summary},
+            required_environment_conditions=[tool.summary],
+            potential_effects=list(policy.effects),
+            risks=list(policy.risks),
+            requires_administrator="no",
+            reversible=True,
+            intent_evidence_quote=quote,
+        )
+    return None
 
 
 def _has_actionable_context(state: OSGuardState) -> bool:
@@ -252,6 +316,19 @@ def create_action_proposal_node(
         )
 
     def propose(state: OSGuardState) -> dict[str, Any]:
+        demo = _demo_candidate(state)
+        if demo is not None:
+            action = ProposedCorrectiveAction(
+                **demo.model_dump(), action_id=action_id_for(demo), risk="low"
+            )
+            return {
+                "proposed_corrective_actions": [action],
+                "action_proposal_result": ActionProposalResult(
+                    status="proposed",
+                    message="The explicitly requested demo-cache action was grounded in a read-only cache inspection for IEEE verification.",
+                    candidate_count=1,
+                ),
+            }
         if not _has_actionable_context(state):
             return {
                 "action_proposal_result": ActionProposalResult(

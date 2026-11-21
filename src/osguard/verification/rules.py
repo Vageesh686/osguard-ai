@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -15,13 +16,23 @@ from osguard.schemas import (
     IEEEVerificationResult,
     OSSubsystem,
     ProposedCorrectiveAction,
+    ProblemType,
     RequestIntent,
     RetrievedEvidence,
     SystemEnvironment,
     ToolExecutionResult,
+    SpecialistName,
     VerificationCheck,
 )
 from osguard.state import OSGuardState
+from osguard.repair.demo_cache import (
+    DEMO_CACHE_ID,
+    DEMO_EVIDENCE_ID,
+    DEMO_PAYLOAD,
+    DEMO_TOOL_NAME,
+    OWNER_MARKER,
+    explicit_demo_request_quote,
+)
 
 
 @dataclass(frozen=True)
@@ -33,6 +44,12 @@ class OperationPolicy:
 
 
 KNOWN_RECOMMENDATION_OPERATIONS: dict[str, OperationPolicy] = {
+    "clear_osguard_demo_cache": OperationPolicy(
+        subsystem=OSSubsystem.STORAGE_FILESYSTEM,
+        risk="low",
+        effects=("Truncates the single OSGuard demo cache payload to zero bytes.",),
+        risks=("The disposable demonstration cache entry is discarded.",),
+    ),
     "install_or_update_dependency": OperationPolicy(
         subsystem=OSSubsystem.SOFTWARE_DEPENDENCIES,
         risk="high",
@@ -470,6 +487,117 @@ def _effect_check(action: ProposedCorrectiveAction) -> tuple[VerificationCheck, 
     )
 
 
+def _demo_tool(state: OSGuardState) -> ToolExecutionResult | None:
+    return next((
+        item for item in state.get("tool_results", [])
+        if item.tool_name == DEMO_TOOL_NAME
+        and item.evidence_id == DEMO_EVIDENCE_ID
+        and item.status == "success"
+    ), None)
+
+
+def _demo_checks(state: OSGuardState, action: ProposedCorrectiveAction) -> tuple[dict[str, VerificationCheck], str]:
+    """Verify the one fixed demo operation without relaxing dependency rules."""
+    request = redact_sensitive_text(state.get("user_request", ""))
+    quote = explicit_demo_request_quote(request)
+    classification = state.get("classification")
+    tool = _demo_tool(state)
+    policy = KNOWN_RECOMMENDATION_OPERATIONS["clear_osguard_demo_cache"]
+    if (
+        quote is None
+        or classification is None
+        or classification.needs_clarification
+        or classification.intent == RequestIntent.VERIFY_COMMAND
+        or classification.problem_type == ProblemType.COMMAND_SAFETY
+        or SpecialistName.COMMAND_VERIFICATION in state.get("selected_specialists", [])
+        or state.get("command_verification_findings")
+        or not any(
+            item.specialist == SpecialistName.DIAGNOSTIC and item.status == "completed"
+            for item in state.get("specialist_results", [])
+        )
+        or any(term in _normalize(request) for term in _NO_CHANGE_TERMS)
+        or action.intent_evidence_quote != quote
+        or action.target_subsystem != OSSubsystem.STORAGE_FILESYSTEM
+        or action.intended_purpose != "Resolve the reported nonempty OSGuard demo cache."
+    ):
+        intent = VerificationCheck(
+            result="fail", rationale="The exact demo-cache repair was not directly requested.",
+            reason_codes=["demo_intent_mismatch"],
+        )
+    else:
+        intent = VerificationCheck(
+            result="pass", rationale="The user explicitly requested clearing the named OSGuard demo cache.",
+            evidence_ids=["user_request_redacted"],
+        )
+
+    good_tool = bool(
+        tool
+        and tool.data.get("cache_id") == DEMO_CACHE_ID
+        and tool.data.get("cache_status") == "ready"
+        and tool.data.get("payload_bytes") == len(DEMO_PAYLOAD)
+        and tool.data.get("payload_sha256") == hashlib.sha256(DEMO_PAYLOAD).hexdigest()
+        and tool.data.get("owner_marker_sha256") == hashlib.sha256(OWNER_MARKER).hexdigest()
+    )
+    if os.name != "nt" or action.requires_administrator != "no":
+        environment = VerificationCheck(
+            result="fail", rationale="The demo repair requires Windows and must not require administrator rights.",
+            reason_codes=["demo_environment_unsupported"],
+        )
+    elif not good_tool or action.required_environment_conditions != [tool.summary]:
+        environment = VerificationCheck(
+            result="unknown", rationale="A valid read-only inspection of the owned, nonempty demo cache is missing.",
+            reason_codes=["demo_precondition_missing"],
+            missing_information=["Inspect the prepared OSGuard demo cache."],
+        )
+    else:
+        environment = VerificationCheck(
+            result="pass", rationale="The Windows-only, non-admin demo fixture was inspected as nonempty and owned.",
+            evidence_ids=[DEMO_EVIDENCE_ID],
+        )
+
+    catalog = evidence_catalog(state)
+    citations_valid = (
+        action.action_id == _content_action_id(action)
+        and action.evidence_ids == ["user_request_redacted", DEMO_EVIDENCE_ID]
+        and set(action.evidence_quotes) == set(action.evidence_ids)
+        and all(_contains(text, catalog.get(source_id, "")) for source_id, text in action.evidence_quotes.items())
+    )
+    if not citations_valid or action.description != "Clear the disposable OSGuard demo cache." or action.rationale != "A read-only inspection found disposable data in the owned OSGuard demo cache.":
+        evidence = VerificationCheck(
+            result="fail", rationale="The demo proposal is not an exact match for its quoted request, inspection, and trusted description.",
+            reason_codes=["demo_evidence_mismatch"],
+        )
+    elif not good_tool or action.evidence_quotes[DEMO_EVIDENCE_ID] != tool.summary:
+        evidence = VerificationCheck(
+            result="unknown", rationale="The demo inspection evidence is unavailable or incomplete.",
+            reason_codes=["demo_evidence_missing"],
+            missing_information=["A successful demo cache inspection with the known disposable payload."],
+        )
+    else:
+        evidence = VerificationCheck(
+            result="pass", rationale="The request and exact read-only demo-cache observation support this candidate.",
+            evidence_ids=list(action.evidence_ids),
+        )
+
+    if (
+        action.operation != "clear_osguard_demo_cache"
+        or action.parameters != {"cache_id": DEMO_CACHE_ID}
+        or action.risk != "low"
+        or action.reversible is not True
+        or set(action.potential_effects) != set(policy.effects)
+        or set(action.risks) != set(policy.risks)
+    ):
+        effect = VerificationCheck(
+            result="fail", rationale="The candidate's target, risk, parameters, or effects differ from the fixed demo operation.",
+            reason_codes=["demo_effect_mismatch"],
+        )
+    else:
+        effect = VerificationCheck(
+            result="pass", rationale="The only effect is clearing one known disposable cache entry; deterministic risk is low.",
+        )
+    return {"intent": intent, "environment": environment, "evidence": evidence, "effect": effect}, "low"
+
+
 def _merge_check(deterministic: VerificationCheck, llm: VerificationCheck | None) -> VerificationCheck:
     if deterministic.result == "fail":
         return deterministic
@@ -509,14 +637,17 @@ def verify_action(
 ) -> IEEEVerificationResult:
     """Combine structured assessment with deterministic safety/provenance rules."""
     catalog = evidence_catalog(state)
-    finding = _compatibility_match(action, state)
-    checks = {
-        "intent": _intent_check(action, state, finding),
-        "environment": _environment_check(action, state, finding, catalog),
-        "evidence": _evidence_check(action, state, finding, catalog),
-    }
-    effect, risk = _effect_check(action)
-    checks["effect"] = effect
+    if action.operation == "clear_osguard_demo_cache":
+        checks, risk = _demo_checks(state, action)
+    else:
+        finding = _compatibility_match(action, state)
+        checks = {
+            "intent": _intent_check(action, state, finding),
+            "environment": _environment_check(action, state, finding, catalog),
+            "evidence": _evidence_check(action, state, finding, catalog),
+        }
+        effect, risk = _effect_check(action)
+        checks["effect"] = effect
 
     if assessment is None:
         llm_checks: dict[str, VerificationCheck | None] = {name: None for name in checks}

@@ -10,9 +10,11 @@ from osguard.schemas import (
     ApprovalState,
     CommandVerificationFinding,
     CompatibilityFinding,
+    DemoCacheSnapshot,
     DiagnosticHypothesis,
     DiagnosticObservation,
     ExecutionValidationResult,
+    PostRepairValidationResult,
     FinalResponse,
     IEEEVerificationResult,
     IEEEVerificationSummary,
@@ -20,6 +22,7 @@ from osguard.schemas import (
     ProblemType,
     ProposedCorrectiveAction,
     RepairEligibility,
+    RepairPlan,
     RetrievedEvidence,
     RetrievalResult,
     SpecialistName,
@@ -83,9 +86,11 @@ class OSGuardState(TypedDict, total=False):
     ieee_verification_results: Annotated[list[IEEEVerificationResult], merge_ieee_results]
     ieee_verification_summary: IEEEVerificationSummary
     repair_eligibility: RepairEligibility | None
+    repair_eligibility_results: list[RepairEligibility]
+    repair_plan: RepairPlan | None
     approval_state: ApprovalState | None
     execution_result: ExecutionValidationResult | None
-    validation_result: ExecutionValidationResult | None
+    validation_result: PostRepairValidationResult | None
     specialist_results: Annotated[list[SpecialistResult], operator.add]
     completed_specialists: Annotated[list[SpecialistName], operator.add]
     errors: Annotated[list[WorkflowError], operator.add]
@@ -122,9 +127,11 @@ def make_initial_state(user_request: str) -> OSGuardState:
         "ieee_verification_results": [],
         "ieee_verification_summary": IEEEVerificationSummary(),
         "repair_eligibility": RepairEligibility(),
+        "repair_eligibility_results": [],
+        "repair_plan": None,
         "approval_state": ApprovalState(),
         "execution_result": ExecutionValidationResult(),
-        "validation_result": ExecutionValidationResult(),
+        "validation_result": PostRepairValidationResult(),
         "specialist_results": [],
         "completed_specialists": [],
         "errors": [],

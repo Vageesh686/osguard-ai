@@ -162,7 +162,8 @@ def test_supervisor_to_ieee_to_final_response_is_integrated():
     assert result["ieee_verification_results"][0].overall == "supported"
     assert "1 supported" in result["final_response"].message
     assert "do not authorize execution" in result["final_response"].message
-    assert result["repair_eligibility"].status == "not_evaluated"
+    assert result["repair_eligibility"].status == "ineligible"
+    assert result["repair_eligibility"].reason_codes == ["recommendation_only"]
     assert result["execution_result"].status == "not_started"
 
 
@@ -172,8 +173,11 @@ def test_graph_edges_require_proposal_and_ieee_before_final_response():
 
     assert ("aggregate_findings", "propose_corrective_actions") in edges
     assert ("propose_corrective_actions", "ieee_verification") in edges
-    assert ("ieee_verification", "final_response") in edges
+    assert ("ieee_verification", "repair_planning") in edges
+    assert ("repair_planning", "final_response") in edges
+    assert ("repair_planning", "approval_interrupt") in edges
     assert ("aggregate_findings", "final_response") not in edges
+    assert ("ieee_verification", "final_response") not in edges
 
 
 def test_multiple_actions_and_partial_specialist_failure_preserve_results():

@@ -8,6 +8,12 @@ from types import ModuleType
 from osguard.schemas import (
     IEEEVerificationResult,
     IEEEVerificationSummary,
+    ApprovalState,
+    DemoCacheSnapshot,
+    ExecutionValidationResult,
+    PostRepairValidationResult,
+    RepairEligibility,
+    RepairPlan,
     ProposedCorrectiveAction,
     VerificationCheck,
     FinalResponse,
@@ -37,6 +43,7 @@ class _FakeStreamlit(ModuleType):
         super().__init__("streamlit")
         self.calls = []
         self.session_state = {}
+        self.button_returns = {}
 
     def cache_resource(self, **_kwargs):
         return lambda function: function
@@ -45,11 +52,16 @@ class _FakeStreamlit(ModuleType):
         self.calls.append(("expander", args, kwargs))
         return _Expander()
 
+    def spinner(self, *args, **kwargs):
+        self.calls.append(("spinner", args, kwargs))
+        return _Expander()
+
     def text_area(self, *_args, **_kwargs):
         return ""
 
-    def button(self, *_args, **_kwargs):
-        return False
+    def button(self, label, **kwargs):
+        self.calls.append(("button", (label,), kwargs))
+        return self.button_returns.pop(label, False)
 
     def __getattr__(self, name):
         def record(*args, **kwargs):
@@ -257,4 +269,99 @@ def test_streamlit_ui_displays_ieee_checks_sources_and_no_execution_controls(mon
     assert any(name == "warning" and "administrator requirements" in str(args).casefold() for name, args in rendered)
     button_labels = [str(args).casefold() for name, args in rendered if name == "button"]
     assert not any("approve" in label or "execute" in label or "repair" in label for label in button_labels)
+
+
+def _phase5_ui_result():
+    snapshot = DemoCacheSnapshot(
+        target="C:/project/data/demo_app/cache",
+        payload_size=64,
+        payload_sha256="a" * 64,
+        owner_marker_sha256="b" * 64,
+    )
+    plan = RepairPlan(
+        plan_id="plan-" + "1" * 32,
+        action_id="act-" + "2" * 16,
+        executable_action_id="CLEAR_OSGUARD_DEMO_CACHE",
+        target=snapshot.target,
+        parameters={"cache_id": "osguard_demo"},
+        intended_outcome="The disposable cache is empty.",
+        expected_effects=["The known cache entry is cleared."],
+        potential_risks=["Disposable demo data is discarded."],
+        preconditions=["The marker and known payload are present."],
+        validator_id="demo_cache_empty_and_owned",
+        pre_state=snapshot,
+        fingerprint="f" * 64,
+    )
+    return {
+        "repair_plan": plan,
+        "repair_eligibility": RepairEligibility(
+            status="eligible", action_id=plan.action_id, plan_id=plan.plan_id,
+        ),
+        "repair_eligibility_results": [RepairEligibility(
+            status="eligible", action_id=plan.action_id, plan_id=plan.plan_id,
+        )],
+        "approval_state": ApprovalState(
+            status="pending", action_id=plan.action_id, plan_id=plan.plan_id,
+            fingerprint=plan.fingerprint,
+        ),
+        "execution_result": ExecutionValidationResult(),
+        "validation_result": PostRepairValidationResult(),
+        "workflow_status": "awaiting_approval",
+    }
+
+
+def test_phase5_ui_shows_exact_plan_and_approval_only_when_pending(monkeypatch):
+    render, fake_st = _load_app_with_fake_streamlit(monkeypatch)
+    controls = render.__globals__["_render_approval_controls"]
+    result = _phase5_ui_result()
+    fake_st.session_state["osguard_pending_thread_id"] = "ui-thread"
+
+    render(result)
+    controls(result)
+
+    rendered = [(name, args) for name, args, _kwargs in fake_st.calls]
+    assert any(name == "write" and "CLEAR_OSGUARD_DEMO_CACHE" in str(args) for name, args in rendered)
+    assert any(name == "write" and "C:/project/data/demo_app/cache" in str(args) for name, args in rendered)
+    assert any(name == "button" and args == ("APPROVE",) for name, args in rendered)
+    assert any(name == "button" and args == ("DECLINE",) for name, args in rendered)
+
+    fake_st.calls.clear()
+    ineligible = {**result, "repair_eligibility": RepairEligibility(status="ineligible")}
+    controls(ineligible)
+    assert not any(name == "button" for name, _args, _kwargs in fake_st.calls)
+
+
+def test_phase5_ui_consumes_resume_cursor_and_does_not_repeat_on_rerun(monkeypatch):
+    render, fake_st = _load_app_with_fake_streamlit(monkeypatch)
+    controls = render.__globals__["_render_approval_controls"]
+    result = _phase5_ui_result()
+    fake_st.session_state["osguard_pending_thread_id"] = "ui-thread"
+    fake_st.button_returns["APPROVE"] = True
+    calls = []
+    completed = {
+        **result,
+        "approval_state": result["approval_state"].model_copy(update={"status": "approved"}),
+        "execution_result": ExecutionValidationResult(status="succeeded"),
+        "validation_result": PostRepairValidationResult(status="resolved", details="Fixture empty."),
+    }
+
+    class _Workflow:
+        def invoke(self, command, config):
+            calls.append((command.resume, config))
+            return completed
+
+    render.__globals__["_get_supervisor_graph"] = lambda: _Workflow()
+    controls(result)
+    assert len(calls) == 1, [(name, args) for name, args, _ in fake_st.calls if name in {"error", "button"}]
+    assert calls[0][0] == {
+        "decision": "approve",
+        "plan_id": result["repair_plan"].plan_id,
+        "fingerprint": result["repair_plan"].fingerprint,
+    }
+    assert "osguard_pending_thread_id" not in fake_st.session_state
+    controls(fake_st.session_state["osguard_supervisor_result"])
+    assert len(calls) == 1
+
+    render(completed)
+    assert any(name == "success" and "Resolved" in str(args) for name, args, _kwargs in fake_st.calls)
 

@@ -158,6 +158,7 @@ class RetrievalResult(StrictModel):
 
     status: Literal[
         "success",
+        "not_applicable",
         "empty_query",
         "index_missing",
         "no_results",
@@ -269,7 +270,44 @@ class RepairEligibility(StrictModel):
         "not_evaluated"
     )
     action_id: str | None = None
+    plan_id: str | None = None
     reason_codes: list[str] = Field(default_factory=list)
+    message: str = ""
+
+
+class DemoCacheSnapshot(StrictModel):
+    """Measured state of the one OSGuard-owned disposable cache entry."""
+
+    cache_id: Literal["osguard_demo"] = "osguard_demo"
+    target: str
+    payload_size: int = Field(ge=0)
+    payload_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    owner_marker_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
+class DemoCacheInspection(StrictModel):
+    status: Literal["ready", "empty", "missing", "unsafe", "invalid", "failed", "unsupported_os"]
+    snapshot: DemoCacheSnapshot | None = None
+    reason_code: str = ""
+    message: str = ""
+
+
+class RepairPlan(StrictModel):
+    """An exact, immutable-by-fingerprint preview; not execution authority."""
+
+    plan_id: str = Field(pattern=r"^plan-[a-f0-9]{32}$")
+    action_id: str = Field(pattern=r"^act-[a-f0-9]{16}$")
+    executable_action_id: str
+    target: str
+    parameters: dict[str, str]
+    intended_outcome: str
+    expected_effects: list[str]
+    potential_risks: list[str]
+    preconditions: list[str]
+    requires_user_approval: Literal[True] = True
+    validator_id: str
+    pre_state: DemoCacheSnapshot
+    fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
 class ApprovalState(StrictModel):
@@ -277,12 +315,40 @@ class ApprovalState(StrictModel):
         "not_requested"
     )
     action_id: str | None = None
+    plan_id: str | None = None
+    fingerprint: str | None = None
+    reason_codes: list[str] = Field(default_factory=list)
+
+
+class ApprovalDecision(StrictModel):
+    decision: Literal["approve", "decline"]
+    plan_id: str
+    fingerprint: str
 
 
 class ExecutionValidationResult(StrictModel):
-    status: Literal["not_started", "succeeded", "failed", "unknown"] = "not_started"
+    status: Literal[
+        "not_started", "succeeded", "failed", "unknown", "blocked", "already_executed"
+    ] = "not_started"
     action_id: str | None = None
+    plan_id: str | None = None
     details: str | None = None
+    reason_codes: list[str] = Field(default_factory=list)
+    before_snapshot: DemoCacheSnapshot | None = None
+    after_snapshot: DemoCacheSnapshot | None = None
+
+
+class PostRepairValidationResult(StrictModel):
+    status: Literal[
+        "not_started", "resolved", "unresolved", "partially_resolved", "failed", "unverifiable"
+    ] = "not_started"
+    action_id: str | None = None
+    plan_id: str | None = None
+    details: str = ""
+    evidence: list[str] = Field(default_factory=list)
+    reason_codes: list[str] = Field(default_factory=list)
+    before_snapshot: DemoCacheSnapshot | None = None
+    after_snapshot: DemoCacheSnapshot | None = None
 
 
 class SpecialistResult(StrictModel):

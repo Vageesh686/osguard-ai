@@ -17,6 +17,7 @@ from osguard.schemas import (
     WorkflowError,
 )
 from osguard.state import OSGuardState
+from osguard.repair.demo_cache import DemoCacheStore, explicit_demo_request_quote, is_exact_demo_request
 from osguard.tools.windows import (
     get_disk_info,
     get_event_logs,
@@ -56,9 +57,13 @@ def select_read_only_tools(state: OSGuardState) -> list[tuple[str, dict[str, Any
     planned: list[tuple[str, dict[str, Any]]] = []
     subsystems = set(classification.os_subsystems)
     request = state.get("user_request", "").casefold()
+    if is_exact_demo_request(state.get("user_request", "")) and SpecialistName.DIAGNOSTIC in selected:
+        return [("inspect_osguard_demo_cache", {})]
     if SpecialistName.COMPATIBILITY in selected:
         planned.append(("get_system_info", {}))
     if SpecialistName.DIAGNOSTIC in selected:
+        if explicit_demo_request_quote(state.get("user_request", "")):
+            planned.append(("inspect_osguard_demo_cache", {}))
         if OSSubsystem.PROCESS_CPU in subsystems or any(token in request for token in ("high cpu", "cpu usage", "slow computer", "slow pc")):
             planned.append(("get_process_stats", {"limit": 12, "sample_seconds": 0.15}))
         if OSSubsystem.MEMORY in subsystems or any(token in request for token in ("memory usage", "ram usage", "out of memory", "low memory")):
@@ -109,6 +114,7 @@ def create_evidence_collection_node(
         "get_disk_info": get_disk_info,
         "get_service_status": get_service_status,
         "get_event_logs": get_event_logs,
+        "inspect_osguard_demo_cache": DemoCacheStore().tool_result,
     }
     if windows_tools:
         tools.update(windows_tools)
@@ -119,12 +125,18 @@ def create_evidence_collection_node(
             return {}
         request = state.get("user_request", "")
         query = redact_sensitive_text(request.strip())[:2000]
-        try:
-            retrieval = active_retriever(query)
-            if not isinstance(retrieval, RetrievalResult):
-                retrieval = RetrievalResult.model_validate(retrieval)
-        except Exception as exc:
-            retrieval = _retrieval_failure(query, exc)
+        if is_exact_demo_request(request):
+            retrieval = RetrievalResult(
+                status="not_applicable", query="",
+                message="The fixed local demo cache uses its dedicated read-only inspector; documentation retrieval is not required.",
+            )
+        else:
+            try:
+                retrieval = active_retriever(query)
+                if not isinstance(retrieval, RetrievalResult):
+                    retrieval = RetrievalResult.model_validate(retrieval)
+            except Exception as exc:
+                retrieval = _retrieval_failure(query, exc)
 
         tool_results: list[ToolExecutionResult] = []
         errors: list[WorkflowError] = []
