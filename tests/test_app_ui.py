@@ -236,6 +236,36 @@ def test_streamlit_ui_renders_retrieved_source_and_tool_measurement(monkeypatch)
     assert any(name == "write" and "FAISS available" in str(args) for name, args in rendered)
 
 
+def test_streamlit_ui_shows_memory_process_table_and_raw_result(monkeypatch):
+    render_result, fake_st = _load_app_with_fake_streamlit(monkeypatch)
+    result = _base_result(
+        specialist_status="completed", workflow_status="specialists_completed",
+        message="The measured memory snapshot is available.",
+    )
+    result["tool_results"] = [
+        ToolExecutionResult(
+            tool_name="get_memory_info", status="success", summary="Memory snapshot",
+            evidence_id="tool:get_memory_info:fixture",
+            data={"total_bytes": 1000, "used_bytes": 600, "available_bytes": 400,
+                  "utilization_percent": 60.0},
+        ),
+        ToolExecutionResult(
+            tool_name="get_process_stats", status="success", summary="Process snapshot",
+            evidence_id="tool:get_process_stats:fixture",
+            data={"sort_by": "memory", "memory_metric_definition": "Working set is not additive.",
+                  "processes": [{"name": "fixture.exe", "pid": 4, "memory_bytes": 512,
+                                 "memory_mib": 0.0, "cpu_percent": None}]},
+        ),
+    ]
+    render_result(result)
+    assert any(name == "dataframe" and args[0][0]["Process"] == "fixture.exe"
+               for name, args, _ in fake_st.calls)
+    assert any(name == "write" and "400 bytes available" in str(args)
+               for name, args, _ in fake_st.calls)
+    assert any(name == "expander" and "Raw read-only Windows checks" in str(args)
+               for name, args, _ in fake_st.calls)
+
+
 def test_streamlit_ui_reports_in_memory_fallback_without_claiming_faiss(monkeypatch):
     render_result, fake_st = _load_app_with_fake_streamlit(monkeypatch)
     result = _base_result(

@@ -12,7 +12,7 @@ and post-repair validation.
 ```mermaid
 flowchart TD
     U[User request in Streamlit] --> S[LangGraph Supervisor]
-    S --> E[One-pass shared evidence collection]
+    S --> E[Shared bounded evidence collection]
     E --> R[Curated Microsoft docs: FAISS or in-memory fallback]
     E --> T[Allowlisted read-only Windows tools]
     R --> X[Reducer-backed shared state]
@@ -54,8 +54,11 @@ Its Pydantic outputs use Groq JSON Schema mode with best-effort schema
 enforcement; application-side Pydantic validation and deterministic safety
 rules still govern accepted findings and actions.
 The evidence collector runs once after classification, performs at most one
-documentation lookup, and invokes only the relevant fixed read-only tools. It does not
-expose a generic tool-calling loop. Classifier, model, retrieval function,
+documentation lookup, and invokes only the relevant fixed read-only tools.
+It selects at most four distinct initial tools from the classified issue and
+request text. A single deterministic follow-up is allowed when a successful
+service check finds a named service stopped; that follow-up reads bounded
+System events. There is no generic tool-calling loop. Classifier, model, retrieval function,
 tools, specialists, action proposer, and IEEE assessor can be injected so tests
 do not require Groq, the network, a local index, or host inspection.
 
@@ -120,8 +123,11 @@ The collector has an explicit function map; there is no generic command or
 PowerShell execution interface.
 
 - `get_system_info`: Windows version/build and architecture; no machine name.
-- `get_process_stats`: bounded CPU sample and at most 50 process rows; process
-  scan capped at 200 and no command lines/user identities are collected.
+- `get_process_stats`: at most 50 process rows, ranked by CPU for CPU issues or
+  by resident working-set memory for memory issues. CPU sampling scans at most
+  200 processes; the single-snapshot memory scan caps at 500. No command lines
+  or user identities are collected. Process working sets can share pages and
+  must not be added to estimate total physical memory use.
 - `get_memory_info`: total, available, used memory and utilization.
 - `get_disk_info`: capacity and filesystem for at most 24 local volumes.
 - `get_service_status`: one exact validated service name, no wildcards.

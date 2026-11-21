@@ -21,6 +21,7 @@ _SERVICE_NAME = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 _ALLOWED_LOGS = {"Application", "System", "Setup"}
 _ALLOWED_EVENT_FILTERS = {"log_name", "hours_back", "event_ids", "levels", "max_events"}
 _MAX_PROCESS_SCAN = 200
+_MAX_MEMORY_PROCESS_SCAN = 500
 _MAX_DISK_PARTITIONS = 24
 
 
@@ -77,59 +78,112 @@ def get_system_info() -> ToolExecutionResult:
         return _result("get_system_info", "failed", "Windows system information could not be read.", error=type(exc).__name__)
 
 
-def get_process_stats(*, limit: int = 10, sample_seconds: float = 0.15) -> ToolExecutionResult:
-    """Sample system CPU and a bounded set of process CPU/memory values."""
+def get_process_stats(
+    *, limit: int = 10, sample_seconds: float = 0.15, sort_by: str = "cpu"
+) -> ToolExecutionResult:
+    """Read one bounded process snapshot, ranked by CPU or resident memory."""
     if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 50:
         return _result("get_process_stats", "invalid_input", "limit must be an integer from 1 to 50.")
     if not isinstance(sample_seconds, (int, float)) or isinstance(sample_seconds, bool) or not 0.05 <= sample_seconds <= 0.5:
         return _result("get_process_stats", "invalid_input", "sample_seconds must be from 0.05 to 0.5.")
+    if not isinstance(sort_by, str) or sort_by not in {"cpu", "memory"}:
+        return _result("get_process_stats", "invalid_input", "sort_by must be cpu or memory.")
     if not _is_windows():
         return _result("get_process_stats", "unsupported_os", "Process snapshots are enabled only on Windows.")
     try:
-        sampled: list[tuple[Any, int, str]] = []
+        scan_limit = _MAX_MEMORY_PROCESS_SCAN if sort_by == "memory" else _MAX_PROCESS_SCAN
+        sampled: list[tuple[Any, int, str, int | None]] = []
         denied_during_scan = 0
-        for process in psutil.process_iter(attrs=["pid", "name"]):
-            if len(sampled) >= _MAX_PROCESS_SCAN:
+        terminated_during_scan = 0
+        inspected = 0
+        attributes = ["pid", "name", "memory_info"] if sort_by == "memory" else ["pid", "name"]
+        for process in psutil.process_iter(attrs=attributes):
+            if inspected >= scan_limit:
                 break
+            inspected += 1
             try:
                 info = process.info
                 name = str(info.get("name") or "unknown")[:120]
-                process.cpu_percent(interval=None)
-                sampled.append((process, int(info.get("pid") or process.pid), name))
+                memory_info = info.get("memory_info") if sort_by == "memory" else None
+                if sort_by == "memory" and "memory_info" in info and memory_info is None:
+                    denied_during_scan += 1
+                    continue
+                if sort_by == "cpu":
+                    process.cpu_percent(interval=None)
+                sampled.append((
+                    process, int(info.get("pid") or process.pid), name,
+                    int(memory_info.rss) if memory_info is not None else None,
+                ))
             except psutil.AccessDenied:
                 denied_during_scan += 1
                 continue
             except (psutil.NoSuchProcess, psutil.ZombieProcess):
+                terminated_during_scan += 1
                 continue
-        time.sleep(float(sample_seconds))
-        system_cpu = psutil.cpu_percent(interval=None)
+        if sort_by == "cpu":
+            time.sleep(float(sample_seconds))
+            system_cpu = round(float(psutil.cpu_percent(interval=None)), 1)
+        else:
+            system_cpu = None
         rows: list[dict[str, Any]] = []
-        for process, pid, name in sampled:
+        for process, pid, name, scanned_memory in sampled:
             try:
+                memory_bytes = scanned_memory if scanned_memory is not None else int(process.memory_info().rss)
+                cpu_percent = (
+                    round(float(process.cpu_percent(interval=None)), 1)
+                    if sort_by == "cpu" else None
+                )
                 rows.append(
                     {
                         "pid": pid,
                         "name": name,
-                        "cpu_percent": round(float(process.cpu_percent(interval=None)), 1),
-                        "memory_mb": round(process.memory_info().rss / (1024 * 1024), 1),
+                        "cpu_percent": cpu_percent,
+                        "memory_bytes": memory_bytes,
+                        "memory_mib": round(memory_bytes / (1024 * 1024), 1),
+                        "memory_mb": round(memory_bytes / (1024 * 1024), 1),
                     }
                 )
-            except (psutil.AccessDenied, psutil.NoSuchProcess, psutil.ZombieProcess):
+            except psutil.AccessDenied:
+                denied_during_scan += 1
                 continue
-        rows.sort(key=lambda row: (row["cpu_percent"], row["memory_mb"]), reverse=True)
+            except (psutil.NoSuchProcess, psutil.ZombieProcess):
+                terminated_during_scan += 1
+                continue
+        top_memory = sorted(rows, key=lambda row: row["memory_bytes"], reverse=True)[:limit]
+        if sort_by == "memory":
+            rows.sort(key=lambda row: (row["memory_bytes"], row["cpu_percent"] or 0), reverse=True)
+        else:
+            rows.sort(key=lambda row: (row["cpu_percent"], row["memory_bytes"]), reverse=True)
         data = {
-            "system_cpu_percent": round(float(system_cpu), 1),
-            "sample_window_seconds": float(sample_seconds),
-            "processes_scanned": len(sampled),
+            "sort_by": sort_by,
+            "system_cpu_percent": system_cpu,
+            "sample_window_seconds": float(sample_seconds) if sort_by == "cpu" else None,
+            "processes_scanned": inspected,
+            "process_scan_limit": scan_limit,
+            "process_scan_cap_reached": inspected >= scan_limit,
             "processes_skipped_access_denied": denied_during_scan,
+            "processes_skipped_terminated": terminated_during_scan,
+            "memory_metric": "rss_working_set_bytes",
+            "memory_metric_definition": (
+                "Process resident set size (RSS), corresponding to the Windows working set. "
+                "Shared pages can appear in more than one process; process values are not "
+                "additive and do not equal system-wide used physical memory."
+            ),
             "processes": rows[:limit],
+            "top_memory_processes": top_memory,
         }
-        if not sampled and denied_during_scan:
+        if not rows and denied_during_scan:
             return _result(
                 "get_process_stats", "permission_denied",
                 "No process statistics were accessible.", data=data,
             )
-        return _result("get_process_stats", "success", "Sampled system CPU and bounded process statistics.", data=data)
+        summary = (
+            "Sampled system CPU and bounded process statistics."
+            if sort_by == "cpu" else "Read bounded process working-set memory statistics."
+        )
+        if denied_during_scan or terminated_during_scan or inspected >= scan_limit:
+            summary += " Some processes were inaccessible, exited, or the scan cap was reached."
+        return _result("get_process_stats", "success", summary, data=data)
     except Exception as exc:
         status = "permission_denied" if _permission_error(exc) else "failed"
         return _result("get_process_stats", status, "Process statistics could not be read.", error=type(exc).__name__)

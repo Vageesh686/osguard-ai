@@ -68,6 +68,13 @@ def _render_supervisor_result(result):
     workflow_status = result.get("workflow_status", "unknown")
     st.write(f"**Workflow status:** {_display_label(workflow_status)}")
 
+    final_response = result.get("final_response")
+    if final_response is not None:
+        st.subheader("Investigation summary")
+        st.write(final_response.message)
+        if not final_response.findings_available:
+            st.caption("No verified findings were produced.")
+
     missing = result.get("missing_information", [])
     if missing:
         st.warning("Information needed: " + "; ".join(missing))
@@ -111,7 +118,53 @@ def _render_supervisor_result(result):
 
     tool_results = result.get("tool_results", [])
     if tool_results:
-        with st.expander("Read-only Windows checks", expanded=True):
+        memory_result = next((item for item in tool_results if item.tool_name == "get_memory_info" and item.status == "success"), None)
+        if memory_result is not None:
+            values = memory_result.data
+            if all(key in values for key in ("total_bytes", "used_bytes", "available_bytes", "utilization_percent")):
+                st.write(
+                    "**Physical memory snapshot:** "
+                    f"{values['used_bytes']:,} bytes used, "
+                    f"{values['available_bytes']:,} bytes available, "
+                    f"{values['total_bytes']:,} bytes total "
+                    f"({values['utilization_percent']}% utilization)."
+                )
+                st.caption(f"Measured by get_memory_info · evidence ID: {memory_result.evidence_id}")
+        process_result = next((item for item in tool_results if item.tool_name == "get_process_stats" and item.status == "success"), None)
+        if process_result is not None:
+            snapshot = process_result.data
+            processes = snapshot.get("processes", [])
+            if processes:
+                sort_by = snapshot.get("sort_by", "cpu")
+                st.markdown(f"**Accessible processes ranked by {sort_by}**")
+                st.dataframe([
+                    {
+                        "Process": row.get("name"),
+                        "PID": row.get("pid"),
+                        "Working set (bytes)": row.get("memory_bytes"),
+                        "Working set (MiB)": row.get("memory_mib", row.get("memory_mb")),
+                        "CPU (%)": row.get("cpu_percent"),
+                    }
+                    for row in processes
+                ], hide_index=True, use_container_width=True)
+                st.caption(snapshot.get("memory_metric_definition", "Process memory is a snapshot."))
+                if snapshot.get("process_scan_cap_reached"):
+                    st.warning(
+                        f"Process scan stopped at its {snapshot.get('process_scan_limit')} process cap; "
+                        "the table may omit larger processes."
+                    )
+                if sort_by == "cpu" and memory_result is not None and snapshot.get("top_memory_processes"):
+                    st.markdown("**Accessible processes ranked by memory**")
+                    st.dataframe([
+                        {
+                            "Process": row.get("name"),
+                            "PID": row.get("pid"),
+                            "Working set (bytes)": row.get("memory_bytes"),
+                            "Working set (MiB)": row.get("memory_mib"),
+                        }
+                        for row in snapshot["top_memory_processes"]
+                    ], hide_index=True, use_container_width=True)
+        with st.expander("Raw read-only Windows checks", expanded=False):
             for tool_result in tool_results:
                 st.markdown(f"**{_display_label(tool_result.tool_name)} — {_display_label(tool_result.status)}**")
                 st.caption(tool_result.summary)
@@ -356,12 +409,6 @@ def _render_supervisor_result(result):
             st.caption("Validation evidence: " + ", ".join(validation.evidence))
         if validation.reason_codes:
             st.caption("Validation reasons: " + ", ".join(validation.reason_codes))
-
-    final_response = result.get("final_response")
-    if final_response is not None:
-        st.write(final_response.message)
-        if not final_response.findings_available:
-            st.caption("No verified findings were produced.")
 
     for error in result.get("errors", []):
         st.error(error.message)

@@ -1,4 +1,4 @@
-"""One-pass evidence collection shared by selected specialist agents."""
+"""Bounded evidence collection shared by selected specialist agents."""
 
 from __future__ import annotations
 
@@ -10,6 +10,8 @@ from typing import Any
 from osguard.privacy import redact_sensitive_text
 from osguard.schemas import (
     OSSubsystem,
+    ProblemType,
+    RequestIntent,
     RetrievalResult,
     SpecialistName,
     SystemEnvironment,
@@ -47,7 +49,7 @@ def _service_name(request: str) -> str | None:
 
 
 def select_read_only_tools(state: OSGuardState) -> list[tuple[str, dict[str, Any]]]:
-    """Select a short allowlisted tool plan from the structured route and text."""
+    """Select required measurements from the structured route and request."""
     classification = state.get("classification")
     if classification is None or classification.needs_clarification:
         return []
@@ -61,13 +63,28 @@ def select_read_only_tools(state: OSGuardState) -> list[tuple[str, dict[str, Any
         return [("inspect_osguard_demo_cache", {})]
     if SpecialistName.COMPATIBILITY in selected:
         planned.append(("get_system_info", {}))
-    if SpecialistName.DIAGNOSTIC in selected:
+    if SpecialistName.DIAGNOSTIC in selected and classification.intent in {
+        RequestIntent.DIAGNOSE, RequestIntent.ANALYZE_LOGS,
+        RequestIntent.CHECK_COMPATIBILITY,
+    }:
         if explicit_demo_request_quote(state.get("user_request", "")):
             planned.append(("inspect_osguard_demo_cache", {}))
-        if OSSubsystem.PROCESS_CPU in subsystems or any(token in request for token in ("high cpu", "cpu usage", "slow computer", "slow pc")):
-            planned.append(("get_process_stats", {"limit": 12, "sample_seconds": 0.15}))
-        if OSSubsystem.MEMORY in subsystems or any(token in request for token in ("memory usage", "ram usage", "out of memory", "low memory")):
+        memory_needed = (
+            OSSubsystem.MEMORY in subsystems
+            or classification.problem_type == ProblemType.MEMORY
+            or bool(re.search(r"\b(ram|memory|pagefile|paging|swap)\b", request))
+        )
+        cpu_needed = (
+            OSSubsystem.PROCESS_CPU in subsystems
+            or bool(re.search(r"\b(cpu|processor|slow computer|slow pc)\b", request))
+        )
+        if memory_needed:
             planned.append(("get_memory_info", {}))
+        if cpu_needed or memory_needed:
+            planned.append(("get_process_stats", {
+                "limit": 12, "sample_seconds": 0.15,
+                "sort_by": "cpu" if cpu_needed else "memory",
+            }))
         if OSSubsystem.STORAGE_FILESYSTEM in subsystems or any(token in request for token in ("disk space", "disk full", "storage", "file system")):
             planned.append(("get_disk_info", {}))
         if OSSubsystem.SERVICES_STARTUP in subsystems or "service" in request:
@@ -79,12 +96,31 @@ def select_read_only_tools(state: OSGuardState) -> list[tuple[str, dict[str, Any
         elif any(token in request for token in ("event log", "event viewer", "crash", "crashes", "crashing", "windows update", "after update", "error log")):
             planned.append(("get_event_logs", {"filters": {"log_name": "Application", "hours_back": 24, "max_events": 20}}))
         # Basic OS/build context helps diagnose update, driver, and dependency issues.
-        elif OSSubsystem.DEVICES_DRIVERS in subsystems or OSSubsystem.SOFTWARE_DEPENDENCIES in subsystems:
+        if OSSubsystem.DEVICES_DRIVERS in subsystems or OSSubsystem.SOFTWARE_DEPENDENCIES in subsystems:
             planned.append(("get_system_info", {}))
     unique: dict[str, tuple[str, dict[str, Any]]] = {}
     for name, kwargs in planned:
         unique.setdefault(json.dumps([name, kwargs], sort_keys=True), (name, kwargs))
-    return list(unique.values())
+    return list(unique.values())[:4]
+
+
+def select_follow_up_tools(
+    state: OSGuardState, results: list[ToolExecutionResult]
+) -> list[tuple[str, dict[str, Any]]]:
+    """Request at most one new approved check when a service snapshot needs context."""
+    classification = state.get("classification")
+    if classification is None or SpecialistName.DIAGNOSTIC not in state.get("selected_specialists", []):
+        return []
+    service = next((item for item in results if item.tool_name == "get_service_status"), None)
+    if (
+        service is None or service.status != "success"
+        or str(service.data.get("status", "")).casefold() in {"running", ""}
+        or any(item.tool_name == "get_event_logs" for item in results)
+    ):
+        return []
+    return [("get_event_logs", {"filters": {
+        "log_name": "System", "hours_back": 24, "max_events": 20
+    }})]
 
 
 def _retrieval_failure(query: str, exc: Exception) -> RetrievalResult:
@@ -100,7 +136,7 @@ def create_evidence_collection_node(
     retriever: Callable[..., RetrievalResult] | None = None,
     windows_tools: Mapping[str, WindowsTool] | None = None,
 ) -> Callable[[OSGuardState], dict[str, Any]]:
-    """Create the single bounded collector node with injectable local fixtures."""
+    """Create one collector node with a fixed initial plan and one follow-up."""
     if retriever is None:
         from osguard.rag.retriever import search_documentation
 
@@ -140,7 +176,7 @@ def create_evidence_collection_node(
 
         tool_results: list[ToolExecutionResult] = []
         errors: list[WorkflowError] = []
-        for tool_name, kwargs in select_read_only_tools(state):
+        def run_tool(tool_name: str, kwargs: dict[str, Any]) -> None:
             function = tools.get(tool_name)
             if function is None:
                 tool_results.append(
@@ -151,7 +187,7 @@ def create_evidence_collection_node(
                         error="tool_unavailable",
                     )
                 )
-                continue
+                return
             try:
                 result = function(**kwargs)
                 if not isinstance(result, ToolExecutionResult):
@@ -171,6 +207,12 @@ def create_evidence_collection_node(
                     )
                 )
             tool_results.append(result)
+
+        for tool_name, kwargs in select_read_only_tools(state):
+            run_tool(tool_name, kwargs)
+        for tool_name, kwargs in select_follow_up_tools(state, tool_results):
+            if tool_name not in {item.tool_name for item in tool_results}:
+                run_tool(tool_name, kwargs)
 
         update: dict[str, Any] = {
             "retrieval_result": retrieval,

@@ -67,6 +67,8 @@ def test_process_snapshot_is_bounded_and_reports_cpu_memory(monkeypatch):
         "name": "sample.exe",
         "cpu_percent": 18.5,
         "memory_mb": 32.0,
+        "memory_mib": 32.0,
+        "memory_bytes": 1024 * 1024 * 32,
     }
     assert result.data["processes_scanned"] == 1
     assert windows.get_process_stats(limit=51).status == "invalid_input"

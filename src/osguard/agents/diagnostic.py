@@ -1,4 +1,4 @@
-"""LLM-based symptom analysis grounded in user reports and pasted logs."""
+"""Diagnostic analysis grounded in reported and read-only measured evidence."""
 
 from __future__ import annotations
 
@@ -41,6 +41,14 @@ observation must quote an exact value from a successful tool result, set
 source=read_only_tool, set tool_name, and include that result's evidence_id.
 Every hypothesis must cite exact support from the request, a tool result, or a
 retrieved passage and state why it remains uncertain.
+Interpret total and available physical memory alongside process working sets.
+Process RSS/working-set values may share pages and must not be added to obtain
+system-wide used RAM. A single snapshot cannot establish a memory leak or a
+trend. Do not treat an arbitrary utilization percentage as proof of abnormal
+pressure. Explain what a measured value does and does not establish. Use the
+available tool results before asking the user for measurements already present.
+Use retrieved Microsoft passages only for explanations supported by their
+actual text and cite their evidence IDs.
 Do not invent CPU/memory/disk values, processes, Windows versions, event IDs,
 application versions, or other host facts. Failed tools provide no measured
 evidence. If a claim cannot be tied to supplied data, omit it and ask for it.
@@ -209,6 +217,118 @@ def _safe_steps(steps: list[str]) -> tuple[list[str], bool]:
     return _unique_nonempty(allowed), len(allowed) != len(steps)
 
 
+def _unsupported_memory_claim(description: str, *, has_trend: bool) -> bool:
+    """Reject causal or health assertions a single working-set snapshot cannot prove."""
+    text = description.casefold()
+    if not has_trend and re.search(r"\bleak(?:ing|s)?\b", text):
+        return True
+    memory_context = any(word in text for word in ("memory", "ram", "working set", "utilization", "pressure"))
+    if not memory_context:
+        return False
+    if re.search(r"\b(explains?|accounts? for|makes? up|causes?)\b.{0,100}\b(utilization|used memory|ram usage|memory usage)\b", text):
+        return True
+    return bool(re.search(
+        r"\b(memory|ram|pressure|utilization)\b.{0,100}\b(normal|healthy|safe|unhealthy|abnormal|severe|guideline|threshold)\b"
+        r"|\b(normal|healthy|safe|unhealthy|abnormal|severe|guideline|threshold)\b.{0,100}\b(memory|ram|pressure|utilization)\b",
+        text,
+    ))
+
+
+def _measured_observations(tool_results: list[Any]) -> list[DiagnosticObservation]:
+    """Convert actual successful tool values into bounded, cited facts."""
+    observations: list[DiagnosticObservation] = []
+    for result in tool_results:
+        if result.status != "success" or not result.evidence_id:
+            continue
+        data = result.data
+        descriptions: list[tuple[str, str]] = []
+        if result.tool_name == "get_memory_info" and all(
+            isinstance(data.get(key), (int, float))
+            for key in ("total_bytes", "used_bytes", "available_bytes", "utilization_percent")
+        ):
+            descriptions.append((
+                "Physical memory snapshot: total "
+                f"{data['total_bytes']:,} bytes, used {data['used_bytes']:,} bytes, "
+                f"available {data['available_bytes']:,} bytes "
+                f"({data['utilization_percent']}% utilization).",
+                str(data["available_bytes"]),
+            ))
+        elif result.tool_name == "get_process_stats":
+            if isinstance(data.get("system_cpu_percent"), (int, float)):
+                window = data.get("sample_window_seconds")
+                window_text = (
+                    f" over {window} seconds"
+                    if isinstance(window, (int, float)) else ""
+                )
+                descriptions.append((
+                    f"System CPU sample: {data['system_cpu_percent']}%{window_text}.",
+                    str(data["system_cpu_percent"]),
+                ))
+            for row in data.get("processes", [])[:5]:
+                if not isinstance(row, dict) or not isinstance(row.get("memory_bytes"), int):
+                    continue
+                description = (
+                    f"Process {row.get('name', 'unknown')} (PID {row.get('pid')}) "
+                    f"had a working set of {row['memory_bytes']:,} bytes "
+                    f"({row.get('memory_mib')} MiB) in this snapshot."
+                )
+                if isinstance(row.get("cpu_percent"), (int, float)):
+                    description += f" Sampled CPU: {row['cpu_percent']}%."
+                descriptions.append((description, json.dumps(row, ensure_ascii=False, default=str)))
+        elif result.tool_name == "get_disk_info":
+            for volume in data.get("volumes", [])[:3]:
+                if isinstance(volume, dict) and isinstance(volume.get("free_bytes"), int):
+                    descriptions.append((
+                        f"Volume {volume.get('mountpoint')} had "
+                        f"{volume['free_bytes']:,} free bytes "
+                        f"({volume.get('used_percent')}% used).",
+                        json.dumps(volume, ensure_ascii=False, default=str),
+                    ))
+        elif result.tool_name == "get_service_status" and data.get("status"):
+            descriptions.append((
+                f"Service {data.get('service_name')} reported status {data['status']}.",
+                str(data["status"]),
+            ))
+        elif result.tool_name == "get_event_logs" and isinstance(data.get("count"), int):
+            descriptions.append((
+                f"The {data.get('log_name')} event log returned {data['count']} recent records.",
+                str(data["count"]),
+            ))
+        for description, quote in descriptions:
+            if quote and _normalize(quote) in _normalize(json.dumps(data, ensure_ascii=False, default=str)):
+                observations.append(DiagnosticObservation(
+                    description=description, source="read_only_tool",
+                    supporting_quote=quote, tool_name=result.tool_name,
+                    evidence_ids=[result.evidence_id],
+                ))
+    return observations
+
+
+def _missing_after_measurements(items: list[str], tool_results: list[Any]) -> list[str]:
+    successful = {item.tool_name: item for item in tool_results if item.status == "success"}
+    filtered: list[str] = []
+    for item in items:
+        text = item.casefold()
+        if re.search(r"\b(over time|trend|history|growth|previous|earlier|repeat)\b", text):
+            filtered.append(item)
+            continue
+        memory_known = "get_memory_info" in successful and (
+            ("memory" in text or "ram" in text)
+            and any(word in text for word in ("total", "available", "used", "current", "usage", "utilization"))
+        )
+        process_known = (
+            "get_process_stats" in successful
+            and bool(successful["get_process_stats"].data.get("processes"))
+            and any(word in text for word in ("top process", "highest process", "which process", "process list"))
+        )
+        os_known = "get_system_info" in successful and any(
+            word in text for word in ("windows version", "windows build", "os version")
+        )
+        if not (memory_known or process_known or os_known):
+            filtered.append(item)
+    return _unique_nonempty(filtered)
+
+
 def create_diagnostic_agent(
     *,
     model_provider: ModelProvider | None = None,
@@ -258,25 +378,77 @@ def create_diagnostic_agent(
                 exc=exc,
             )
 
+        tool_results = state.get("tool_results", [])
         observations, omitted_observations = _ground_observations(
-            output.observations, prompt_request, state.get("tool_results", [])
+            output.observations, prompt_request, tool_results
+        )
+        measured = _measured_observations(tool_results)
+        measured = [
+            fact for fact in measured
+            if not any(
+                    item.source == "read_only_tool"
+                    and fact.tool_name == item.tool_name
+                    and any(
+                        value in fact.description
+                        for value in re.findall(r"-?\d+(?:\.\d+)?", item.supporting_quote)
+                        if len(value) >= 2
+                    )
+                    for item in observations
+                )
+        ]
+        observations = list({
+            (item.description, item.evidence_ids[0] if item.evidence_ids else ""): item
+            for item in [*measured, *observations]
+        }.values())
+        retrieval = state.get("retrieval_result")
+        passages = (
+            state.get("retrieved_evidence", [])
+            if retrieval is not None and retrieval.status == "success" else []
         )
         hypotheses, omitted_hypotheses = _ground_hypotheses(
             output.hypotheses,
             prompt_request,
-            state.get("retrieved_evidence", []),
-            state.get("tool_results", []),
+            passages,
+            tool_results,
         )
+        has_trend = any(
+            isinstance(item.data.get("samples"), list) and len(item.data["samples"]) >= 2
+            for item in tool_results if item.status == "success"
+        )
+        grounded_count = len(hypotheses)
+        hypotheses = [
+            item for item in hypotheses
+            if not _unsupported_memory_claim(item.description, has_trend=has_trend)
+        ]
+        omitted_unsupported = len(hypotheses) != grounded_count
         symptoms = [
             symptom.strip()
             for symptom in output.reported_symptoms
             if _quote_is_in_request(symptom, prompt_request)
         ]
+        omitted_symptoms = len(symptoms) != len(output.reported_symptoms)
+        if not symptoms:
+            symptoms = [prompt_request.strip()[:240]]
         steps, omitted_steps = _safe_steps(output.safe_diagnostic_steps)
+        steps = _missing_after_measurements(steps, tool_results)
         uncertainties = list(output.uncertainty_notes)
-        if omitted_observations or omitted_hypotheses or len(symptoms) != len(
-            output.reported_symptoms
-        ):
+        if omitted_unsupported:
+            uncertainties.append(
+                "A model explanation was omitted because the available measurements "
+                "do not establish that causal or memory-pressure claim."
+            )
+        if any(item.tool_name == "get_memory_info" and item.status == "success" for item in tool_results) and not has_trend:
+            uncertainties.append(
+                "One memory snapshot cannot establish a trend or a memory leak; "
+                "pressure needs corroborating symptoms or repeated measurements."
+            )
+        for item in tool_results:
+            if item.tool_name == "get_process_stats" and item.status == "success" and item.data.get("process_scan_cap_reached"):
+                uncertainties.append(
+                    f"The process ranking covers at most {item.data.get('process_scan_limit')} "
+                    "inspected processes; a larger process outside that scan may be missing."
+                )
+        if omitted_observations or omitted_hypotheses or omitted_symptoms:
             uncertainties.append(
                 "Some statements were omitted because their supporting text could not be found in the request."
             )
@@ -293,12 +465,25 @@ def create_diagnostic_agent(
             "diagnostic_observations": observations,
             "diagnostic_hypotheses": hypotheses,
             "safe_diagnostic_steps": steps,
-            "missing_information": _unique_nonempty(output.missing_information),
+            "missing_information": _missing_after_measurements(
+                output.missing_information, tool_results
+            ),
             "uncertainty_notes": _unique_nonempty(uncertainties),
             "specialist_results": [
                 completed_result(
                     SpecialistName.DIAGNOSTIC,
-                    "Diagnostic analysis completed using only the request and supplied text. No system tools were run.",
+                    (
+                        "Diagnostic analysis completed with "
+                        f"{sum(item.status == 'success' for item in tool_results)} "
+                        "successful read-only measurement(s)"
+                        if tool_results else "Diagnostic analysis completed without host tool calls"
+                    ) + (
+                        f"; {len(tool_results)} tool call(s) were attempted."
+                        if tool_results else "."
+                    ) + (
+                        f" {len(passages)} documentation passage(s) were available."
+                        if passages else " No documentation passages were available."
+                    ),
                 )
             ],
             "completed_specialists": [SpecialistName.DIAGNOSTIC],

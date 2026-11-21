@@ -1,5 +1,72 @@
 # OSGuard AI Progress
 
+## Current milestone: Evidence-driven Windows diagnostics — 2026-11-22
+
+**Status:** The existing Supervisor → shared evidence collector → specialist
+graph now selects approved read-only measurements from the classified issue.
+There is one shared workflow, not a separate RAM pipeline. A memory request
+collects system memory and a memory-ranked process snapshot; CPU requests use
+the same process tool with CPU ranking. The Diagnostic Agent and final report
+carry measured facts with tool evidence IDs and identify hypotheses as
+unconfirmed.
+
+### Implementation
+
+- The collector chooses at most four distinct initial allowlisted tools and
+  supports one bounded System event-log follow-up when a successful named
+  service check reports a stopped service. No generic command execution or
+  new graph node was added.
+- `get_process_stats` now ranks by CPU or working-set memory. The memory path
+  scans at most 500 processes once without a CPU sampling delay; the CPU path
+  keeps its 200-process bound. The tool reports scan limits, denied/terminated
+  processes, memory bytes and MiB, and whether the cap was reached. Working
+  sets are not summed to infer physical RAM use.
+- Successful tool values become bounded diagnostic observations with actual
+  evidence IDs. The agent filters unsupported memory-leak, causal, and
+  pressure-severity claims from a single snapshot and does not request already
+  measured values again. The final report starts with the user problem and
+  separates observations, hypotheses, uncertainty, and safe next steps.
+  Streamlit displays memory totals and a ranked process table before raw
+  technical output.
+- Duplicate tool facts are removed when a grounded model observation quotes
+  the same measurement. Missing CPU sample-window metadata is no longer
+  printed as `None seconds`.
+
+### Verification
+
+- Focused regression tests cover tool selection, CPU and memory ranking,
+  permission-denied processes, stopped-service follow-up, grounded diagnostic
+  facts, unsupported claims, final report, and Streamlit display. The final
+  focused run of the affected agent/evidence tests: **16 passed**.
+- The first complete suite found one duplicate CPU observation:
+  **1 failed, 161 passed, 1 skipped**. After the fix, the complete suite run
+  `.\.venv\Scripts\python.exe -m pytest tests -q --disable-warnings`:
+  **162 passed, 1 skipped, 17 warnings** in 12.58 seconds. The skipped
+  directory-symlink fixture lacks Windows symlink privilege (`WinError 1314`).
+  The warnings are dependency deprecations in LangSmith.
+- A real read-only memory/process scan on this host succeeded. After the
+  single-pass process-scan change, 325 processes were inspected without
+  reaching the 500-process cap in 13.86 seconds. These are snapshots, not a
+  trend or diagnosis. A live Supervisor → collector → in-memory RAG →
+  Diagnostic Agent graph run completed with Groq, two successful host tools,
+  four Microsoft passages, seven measured observations, and no graph errors.
+  That live run preceded the later unsupported-claim filter; the filter and
+  duplicate-observation fix were verified with mocked Groq tests, not a new
+  post-fix live call. Native FAISS remains blocked by Smart App Control.
+
+### Files and next work
+
+- Modified `src/osguard/context.py`, `src/osguard/tools/windows.py`,
+  `src/osguard/agents/diagnostic.py`, `src/osguard/graph.py`, `app.py`,
+  `tests/test_windows_tools.py`, `tests/test_specialist_agents.py`,
+  `tests/test_app_ui.py`, `docs/ARCHITECTURE.md`, `ERRORS.md`, and this report;
+  added `tests/test_evidence_diagnostics.py`.
+- A single process snapshot cannot establish growth, a memory leak, or the
+  exact cause of memory pressure. UI behavior has automated Streamlit tests;
+  manual browser inspection and post-fix live Groq wording remain unverified.
+  FAISS native loading remains subject to the host policy. No repair or OS
+  modification was performed.
+
 ## Current milestone: Final RAG integration review — 2026-11-21
 
 **Status:** The complete live Supervisor → in-memory RAG → Diagnostic Agent

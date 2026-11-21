@@ -163,7 +163,10 @@ def final_response_node(state: OSGuardState) -> dict[str, FinalResponse]:
         message += " No specialist analysis was started."
     elif results:
         specialist_labels = ", ".join(item.value for item in selected) or "none"
+        symptoms = list(dict.fromkeys(state.get("diagnostic_symptoms", [])))[:2]
+        problem_intro = "Reported problem: " + "; ".join(symptoms) + ". " if symptoms else ""
         message = (
+            problem_intro +
             f"Classified as {issue_category.value}. Selected specialists: {specialist_labels}. "
             f"Available output: {_finding_summary(state)}. "
             "OSGuard used the supplied request"
@@ -179,6 +182,43 @@ def final_response_node(state: OSGuardState) -> dict[str, FinalResponse]:
             message += " It did not execute commands or perform repairs."
         if any(result.status == "failed" for result in results):
             message += " One or more specialists failed; successful results were retained."
+        if SpecialistName.DIAGNOSTIC in selected:
+            measured = [
+                item for item in state.get("diagnostic_observations", [])
+                if item.source == "read_only_tool"
+            ][:6]
+            reported = [
+                item for item in state.get("diagnostic_observations", [])
+                if item.source != "read_only_tool"
+            ][:2]
+            hypotheses = state.get("diagnostic_hypotheses", [])[:3]
+            if measured:
+                message += " Measured host data: " + "; ".join(
+                    item.description.rstrip(".") for item in measured
+                ) + "."
+            if reported:
+                message += " Reported observations: " + "; ".join(
+                    item.description for item in reported
+                ) + "."
+            if hypotheses:
+                message += " Possible explanations (unconfirmed): " + "; ".join(
+                    item.description for item in hypotheses
+                ) + "."
+            message += " The available snapshot does not establish an exact root cause."
+            limits = list(dict.fromkeys(state.get("uncertainty_notes", [])))[:2]
+            if limits:
+                message += " Evidence limits: " + "; ".join(limits) + "."
+            missing = list(dict.fromkeys(state.get("missing_information", [])))[:3]
+            if missing:
+                message += " Missing information: " + "; ".join(missing) + "."
+            steps = list(dict.fromkeys(state.get("safe_diagnostic_steps", [])))[:3]
+            if steps:
+                message += " Next diagnostic steps: " + "; ".join(steps) + "."
+            if has_documentation:
+                message += " Documentation: " + "; ".join(
+                    f"{item.title} ({item.source_url})" if item.source_url else item.title
+                    for item in state.get("retrieved_evidence", [])[:2]
+                ) + "."
         if verifications:
             counts = {
                 decision: sum(item.overall == decision for item in verifications)

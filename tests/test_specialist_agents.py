@@ -125,7 +125,7 @@ def test_diagnostic_agent_rejects_fabricated_quotes_and_system_changing_steps():
         SpecialistName.DIAGNOSTIC,
     )
 
-    assert update["diagnostic_symptoms"] == []
+    assert update["diagnostic_symptoms"] == ["The app crashes after login."]
     assert update["diagnostic_observations"] == []
     assert update["diagnostic_hypotheses"] == []
     assert update["safe_diagnostic_steps"] == [

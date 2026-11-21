@@ -1,5 +1,23 @@
 # Errors and Environment Blockers
 
+## Evidence-driven diagnostics check — 2026-11-22
+
+- Two focused development runs exposed local test/code issues: a syntax error
+  in a new dictionary comprehension and one outdated exact-dictionary test
+  assertion after adding process memory fields. Both were corrected; the
+  subsequent focused tests passed. Neither was a Windows tool failure.
+- An initial live graph run completed, but its result-printing probe raised
+  `UnicodeEncodeError` on the PowerShell console's CP1252 encoding. A distinct
+  ASCII-safe read-only probe reported a completed memory workflow with two
+  successful host tools, four retrieved passages, and no graph errors.
+- That live response included unsupported causal and severity wording about
+  aggregate RAM utilization. Deterministic filtering and regression fixtures
+  were added afterward. The post-fix wording has been checked in mocked tests;
+  the earlier live response is not evidence that the filter was active then.
+- Native FAISS remains blocked by the existing Smart App Control policy. The
+  live graph used the in-memory retrieval backend. No policy change, native
+  library reinstall, arbitrary command, or repair was attempted.
+
 ## Final RAG integration review — 2026-11-21
 
 - Native FAISS remains blocked by the Smart App Control policy described
