@@ -1,5 +1,29 @@
 # OSGuard AI Progress
 
+## RAG documentation URL redaction fix — 2026-11-22
+
+- Fixed the prompt privacy filter so a public HTTP(S) documentation URL keeps
+  its route and query string when shared RAG evidence is serialized for a
+  specialist. The previous POSIX path matcher treated `/test/cpu` in
+  `https://learn.microsoft.com/test/cpu` as a local path and produced
+  `https:/<PATH>`.
+- Windows drive paths (including forward-slash form), UNC paths, and local
+  POSIX paths remain masked. Private-host URLs and URLs with credentials are
+  masked before the URL-aware POSIX path check. Evidence IDs, titles, OS
+  versions, section metadata, and public source URLs are retained.
+- Added `tests/test_privacy_urls.py` covering public HTTPS and Microsoft Learn
+  URLs, query strings, local and network paths, private hosts, and local paths
+  inside serialized diagnostic evidence. The existing RAG graph integration
+  test confirms the in-memory retrieval result and provenance reach the
+  Diagnostic Agent prompt.
+- Focused run: **11 passed**, 17 LangSmith deprecation warnings.
+- One complete suite run after the fix: **181 passed, 2 skipped**, 17 LangSmith
+  deprecation warnings. The two skips require unavailable Windows symlink
+  privilege in disposable fixtures. No live Groq request, native FAISS load,
+  Windows repair, or MCP protocol run was part of this focused change.
+- Files changed for this fix: `src/osguard/privacy.py`,
+  `tests/test_privacy_urls.py`, `ERRORS.md`, and this progress report.
+
 ## Current milestone: Local MCP diagnostics integration — 2026-11-22
 
 **Implementation status:** A local stdio MCP diagnostic server and client are

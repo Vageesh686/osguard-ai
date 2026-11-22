@@ -1,0 +1,19 @@
+{
+  "format_version": 1,
+  "generation": "83820f83511547ed9816075437e125ce",
+  "embedding_model": "test-hash-encoder",
+  "dimension": 5,
+  "document_count": 1,
+  "chunks": [
+    {
+      "source_id": "cpu-process-doc",
+      "chunk_id": "cpu-process-doc-0000",
+      "title": "CPU and process guidance",
+      "url": "https://learn.microsoft.com/test",
+      "os_version": "Windows 11",
+      "category": "process_cpu",
+      "section": "CPU Process",
+      "passage": "CPU Process\nProcess and CPU diagnostics use bounded measurements to support troubleshooting without establishing a root cause."
+    }
+  ]
+}

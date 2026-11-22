@@ -1,0 +1,19 @@
+{
+  "format_version": 1,
+  "generation": "839cd88d6da74319a2457c3904e23c71",
+  "embedding_model": "test-hash-encoder",
+  "dimension": 5,
+  "document_count": 1,
+  "chunks": [
+    {
+      "source_id": "cpu-process-doc",
+      "chunk_id": "cpu-process-doc-0000",
+      "title": "CPU and process guidance",
+      "url": "https://learn.microsoft.com/test",
+      "os_version": "Windows 11",
+      "category": "process_cpu",
+      "section": "CPU process reference",
+      "passage": "CPU process reference\nProcess CPU measurements help investigate high CPU usage without proving a root cause."
+    }
+  ]
+}

@@ -1,5 +1,20 @@
 # Errors and Environment Blockers
 
+## Resolved RAG documentation URL redaction — 2026-11-22
+
+- A RAG graph integration assertion reported that the retrieved Microsoft
+  source URL was intact in state but became `https:/<PATH>` inside the
+  Diagnostic Agent prompt. The shared evidence serializer passed JSON through
+  the privacy filter; its generic POSIX path regex matched `/test/cpu` inside
+  the HTTPS URL. This was prompt preparation, not a retrieval or MCP failure.
+- The privacy filter now distinguishes URL spans from local POSIX paths and
+  masks private-host URLs. The post-fix focused run passed **11 tests** and
+  the complete suite passed **181 tests**, with **2 symlink-privilege skips**.
+  Native FAISS and live Groq behavior were not exercised by this fix.
+- `git status` could not enumerate the existing `.test_tmp/` directory because
+  Windows returned `Permission denied`. The focused and complete pytest runs
+  used separate disposable directories and passed; `.test_tmp/` was left alone.
+
 ## MCP integration check — 2026-11-22
 
 - The first sandboxed `pip install` attempt could not contact PyPI:
