@@ -1,5 +1,42 @@
 # OSGuard AI — Complete Implementation Blueprint for Codex
 
+## MCP diagnostics implementation addendum (2026-11-22)
+
+This addendum extends the approved read-only tool boundary in the frozen
+Supervisor → collector → specialists → IEEE → approval architecture. It does
+not authorize another agent or another repair executor.
+
+- The collector prefers a local official Python MCP SDK server over stdio.
+  Discovery supplies tool names, descriptions and JSON input schemas. The
+  client intersects these with its independent Pydantic allowlist, performs
+  at most four initial calls and one evidence-driven follow-up, then closes
+  the subprocess. Server/tool errors and timeouts produce explicit results.
+- The direct Python backend is a configurable fallback using the same
+  registered argument policy. Tool evidence IDs survive either transport;
+  `diagnostic_backend` and each result's `backend` record which path ran.
+  MCP has no repair or generic command method.
+- Known-folder metadata scans accept only Downloads, Documents or Desktop
+  resolved by the Windows Known Folder API. Default largest-file inspection
+  is nonrecursive. Recursive scans cap depth, entries and time; no content is
+  opened, and links/junctions are skipped. Partial results cannot claim a
+  definitive largest file or total size.
+- Simple factual questions use local measurements without unnecessary RAG.
+  Explanatory, command and compatibility requests continue to use the shared
+  trusted-source retrieval path. Microsoft command pages remain reference
+  material, never execution authority.
+- `OperationMetadata` documents risk class, target, parameters, effect,
+  prerequisites, permissions, reversibility, validation and approval.
+  The executable registry still contains only `CLEAR_OSGUARD_DEMO_CACHE`.
+  IEEE, exact fingerprint approval, executor revalidation and postcheck remain
+  mandatory for that operation.
+- To extend diagnostics, add a bounded read-only Python function, a strict
+  argument model in `tools/registry.py`, an MCP wrapper in `mcp/server.py`, a
+  collector selection rule and disposable fixture tests. Never add a generic
+  path, shell, PowerShell or repair endpoint.
+
+The original blueprint below remains the architectural reference. Runtime
+verification status is in `docs/PROGRESS.md`.
+
 > **Status:** Implementation specification / college-project MVP (not a claim that code exists yet).  
 > **Target:** Windows 11, local-only, Streamlit, Python, LangGraph + LangChain, FAISS.  
 > **Time budget:** approximately 15 hours (3 × 5-hour sessions). This is an aggressive MVP target, not a guarantee.  

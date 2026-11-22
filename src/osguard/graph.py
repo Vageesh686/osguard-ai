@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+import os
 from typing import Any, Literal
 
 from langgraph.graph import END, START, StateGraph
@@ -126,6 +127,44 @@ def _finding_summary(state: OSGuardState) -> str:
     return "; ".join(parts) if parts else "no structured findings"
 
 
+def _direct_measured_answer(state: OSGuardState) -> str:
+    """Return a factual answer only when the matching read-only tool succeeded."""
+    request = state.get("user_request", "").casefold()
+    tools = {item.tool_name: item for item in state.get("tool_results", []) if item.status == "success"}
+    result = tools.get("get_largest_files")
+    if result:
+        files = result.data.get("files", [])
+        folder = result.data.get("folder", "selected folder")
+        if files:
+            first = files[0]
+            scope = "" if result.data.get("scan_complete") else " among inspected files"
+            return f"Largest file{scope} in {folder}: {first.get('relative_path', first.get('name'))} ({first.get('size_bytes', 0):,} bytes)."
+        return f"No accessible files were found in {folder}" + ("." if result.data.get("scan_complete") else " within the scan limits.")
+    result = tools.get("get_directory_size")
+    if result:
+        scope = "" if result.data.get("scan_complete") else " inspected portion of the"
+        return f"The{scope} {result.data.get('folder', 'selected folder')} folder contains {result.data.get('total_bytes', 0):,} bytes of file data."
+    result = tools.get("list_directory")
+    if result:
+        names = ", ".join(str(item.get("name")) for item in result.data.get("files", [])[:20]) or "none"
+        partial = " This listing is partial." if not result.data.get("scan_complete") or result.data.get("display_truncated") else ""
+        return f"Items in {result.data.get('folder', 'the selected folder')}: {names}.{partial}"
+    result = tools.get("get_service_status")
+    if result and any(word in request for word in ("running", "stopped", "status", "service")):
+        return f"Service {result.data.get('display_name') or result.data.get('service_name')} is {result.data.get('status', 'unknown')} (start type: {result.data.get('start_type', 'unknown')})."
+    result = tools.get("get_process_stats")
+    if result and any(word in request for word in ("most ram", "most memory", "top process")):
+        rows = result.data.get("processes", [])
+        if rows and result.data.get("sort_by") == "memory":
+            first = rows[0]
+            scope = "inspected" if result.data.get("process_scan_cap_reached") else "accessible"
+            return f"The highest working-set process among {scope} processes is {first.get('name')} (PID {first.get('pid')}) at {first.get('memory_bytes', 0):,} bytes. This is a process snapshot, not an application-group total."
+    result = tools.get("get_system_uptime")
+    if result and "uptime" in request:
+        return f"Windows uptime was {result.data.get('uptime_seconds', 0):,} seconds at measurement time."
+    return ""
+
+
 def final_response_node(state: OSGuardState) -> dict[str, FinalResponse]:
     """Build a concise response that reflects available and failed agent results."""
     classification: SupervisorClassification | None = state.get("classification")
@@ -165,8 +204,9 @@ def final_response_node(state: OSGuardState) -> dict[str, FinalResponse]:
         specialist_labels = ", ".join(item.value for item in selected) or "none"
         symptoms = list(dict.fromkeys(state.get("diagnostic_symptoms", [])))[:2]
         problem_intro = "Reported problem: " + "; ".join(symptoms) + ". " if symptoms else ""
+        direct_answer = _direct_measured_answer(state)
         message = (
-            problem_intro +
+            (direct_answer + " " if direct_answer else problem_intro) +
             f"Classified as {issue_category.value}. Selected specialists: {specialist_labels}. "
             f"Available output: {_finding_summary(state)}. "
             "OSGuard used the supplied request"
@@ -204,7 +244,8 @@ def final_response_node(state: OSGuardState) -> dict[str, FinalResponse]:
                 message += " Possible explanations (unconfirmed): " + "; ".join(
                     item.description for item in hypotheses
                 ) + "."
-            message += " The available snapshot does not establish an exact root cause."
+            if not direct_answer:
+                message += " The available snapshot does not establish an exact root cause."
             limits = list(dict.fromkeys(state.get("uncertainty_notes", [])))[:2]
             if limits:
                 message += " Evidence limits: " + "; ".join(limits) + "."
@@ -308,6 +349,8 @@ def build_supervisor_graph(
     evidence_collection_node: EvidenceNode | None = None,
     retriever: Callable[..., RetrievalResult] | None = None,
     windows_tools: Mapping[str, WindowsTool] | None = None,
+    diagnostic_backend: str | None = None,
+    mcp_runner: Callable[..., Any] | None = None,
     action_proposer: Callable[[OSGuardState], Any] | None = None,
     ieee_assessor: Assessor | None = None,
     repair_store: DemoCacheStore | None = None,
@@ -372,7 +415,11 @@ def build_supervisor_graph(
     active_tools = dict(windows_tools or {})
     active_tools.setdefault(DEMO_TOOL_NAME, active_store.tool_result)
     active_evidence_node = evidence_collection_node or create_evidence_collection_node(
-        retriever=retriever, windows_tools=active_tools
+        retriever=retriever, windows_tools=active_tools,
+        diagnostic_backend=diagnostic_backend or (
+            "direct" if windows_tools is not None else os.getenv("OSGUARD_DIAGNOSTIC_BACKEND", "mcp")
+        ),
+        mcp_runner=mcp_runner,
     )
     action_proposal_node = create_action_proposal_node(
         proposer=action_proposer,

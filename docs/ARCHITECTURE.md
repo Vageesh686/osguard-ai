@@ -14,7 +14,9 @@ flowchart TD
     U[User request in Streamlit] --> S[LangGraph Supervisor]
     S --> E[Shared bounded evidence collection]
     E --> R[Curated Microsoft docs: FAISS or in-memory fallback]
-    E --> T[Allowlisted read-only Windows tools]
+    E --> M[Local stdio MCP diagnostics]
+    M --> T[Allowlisted read-only Windows tools]
+    E -.->|MCP unavailable, configured fallback| T
     R --> X[Reducer-backed shared state]
     T --> X
     E -->|selected route| D[Diagnostic Agent]
@@ -61,6 +63,25 @@ service check finds a named service stopped; that follow-up reads bounded
 System events. There is no generic tool-calling loop. Classifier, model, retrieval function,
 tools, specialists, action proposer, and IEEE assessor can be injected so tests
 do not require Groq, the network, a local index, or host inspection.
+
+The preferred diagnostic transport is the official Python MCP SDK over a
+local stdio subprocess. The collector discovers advertised tool names,
+descriptions and input schemas before selecting calls. A separate strict
+client policy validates each argument, and the server wraps the same bounded
+Python read-only functions. A call receives a backend label and retains its
+tool evidence ID. The process is closed after the bounded collection batch.
+If connection or discovery fails, a configured direct Python fallback runs
+the same approved calls and reports that backend explicitly. MCP never exposes
+the demo-cache repair, an arbitrary command, or a network listener. Set
+`OSGUARD_DIAGNOSTIC_BACKEND=direct` to choose direct diagnostics; set
+`OSGUARD_DIRECT_FALLBACK=0` to fail closed instead of falling back.
+
+Approved known-folder tools resolve Downloads, Documents and Desktop with the
+Windows Known Folder API. They inspect file metadata only, reject arbitrary
+paths and reparse points, and cap depth, entry count and elapsed scan time.
+Incomplete scans are labeled partial. The registry also includes bounded
+uptime and service-list reads. No device or driver enumeration was added;
+that capability remains unavailable until a safe API contract is verified.
 
 ## Shared state and evidence provenance
 

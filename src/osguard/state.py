@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import operator
-from typing import Annotated, Required, TypedDict
+from typing import Annotated, Literal, Required, TypedDict
 
 from osguard.schemas import (
     ActionProposalResult,
@@ -79,6 +79,7 @@ class OSGuardState(TypedDict, total=False):
     retrieved_evidence: Annotated[list[RetrievedEvidence], operator.add]
     retrieval_result: RetrievalResult | None
     tool_results: Annotated[list[ToolExecutionResult], operator.add]
+    diagnostic_backend: Literal["mcp", "direct", "unavailable"]
     action_proposal_result: ActionProposalResult
     proposed_corrective_actions: Annotated[
         list[ProposedCorrectiveAction], merge_corrective_actions
@@ -122,6 +123,7 @@ def make_initial_state(user_request: str) -> OSGuardState:
         "retrieved_evidence": [],
         "retrieval_result": None,
         "tool_results": [],
+        "diagnostic_backend": "unavailable",
         "action_proposal_result": ActionProposalResult(),
         "proposed_corrective_actions": [],
         "ieee_verification_results": [],

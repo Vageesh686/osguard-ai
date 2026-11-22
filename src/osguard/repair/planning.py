@@ -5,8 +5,8 @@ import json
 import uuid
 
 from osguard.repair.demo_cache import DEMO_CACHE_ID, DemoCacheStore
-from osguard.repair.registry import CLEAR_OSGUARD_DEMO_CACHE, DEMO_VALIDATOR_ID
-from osguard.schemas import DemoCacheSnapshot, ProposedCorrectiveAction, RepairPlan
+from osguard.repair.registry import CLEAR_OSGUARD_DEMO_CACHE, DEMO_VALIDATOR_ID, REPAIR_REGISTRY
+from osguard.schemas import DemoCacheSnapshot, OperationMetadata, ProposedCorrectiveAction, RepairPlan
 from osguard.verification.rules import KNOWN_RECOMMENDATION_OPERATIONS
 
 
@@ -23,6 +23,7 @@ def _plan_fields(
     store: DemoCacheStore, plan_id: str,
 ) -> dict:
     policy = KNOWN_RECOMMENDATION_OPERATIONS["clear_osguard_demo_cache"]
+    registration = REPAIR_REGISTRY[CLEAR_OSGUARD_DEMO_CACHE]
     return {
         "plan_id": plan_id,
         "action_id": action.action_id,
@@ -36,6 +37,19 @@ def _plan_fields(
         "requires_user_approval": True,
         "validator_id": DEMO_VALIDATOR_ID,
         "pre_state": snapshot.model_dump(mode="json"),
+        "operation_metadata": OperationMetadata(
+            operation_id=registration.executable_action_id,
+            target=str(store.cache_dir),
+            validated_parameters={"cache_id": DEMO_CACHE_ID},
+            intended_effect=_OUTCOME,
+            expected_changes=list(policy.effects),
+            risk_classification="CONTROLLED_CHANGE",
+            preconditions=list(_PRECONDITIONS),
+            required_permissions="standard_user",
+            reversibility="The disposable cache contents are not automatically restored.",
+            validation_method=registration.validator_id,
+            approval_required=True,
+        ).model_dump(mode="json"),
     }
 
 

@@ -83,6 +83,13 @@ def _render_supervisor_result(result):
         st.caption("Uncertainty: " + "; ".join(uncertainties))
 
     st.subheader("Evidence collection")
+    backend = result.get("diagnostic_backend", "unavailable")
+    backend_labels = {
+        "mcp": "MCP active",
+        "direct": "Direct fallback active",
+        "unavailable": "Diagnostic tools unavailable",
+    }
+    st.write("**Diagnostic backend:** " + backend_labels.get(backend, "Diagnostic tools unavailable"))
     retrieval = result.get("retrieval_result")
     if retrieval is None:
         st.caption("Documentation retrieval did not run.")
@@ -118,6 +125,24 @@ def _render_supervisor_result(result):
 
     tool_results = result.get("tool_results", [])
     if tool_results:
+        for name, heading in (
+            ("get_largest_files", "Largest files"),
+            ("list_directory", "Directory contents"),
+            ("list_services", "Windows services"),
+        ):
+            table_result = next((item for item in tool_results if item.tool_name == name and item.status == "success"), None)
+            if table_result is not None:
+                rows = table_result.data.get("services" if name == "list_services" else "files", [])
+                if rows:
+                    st.markdown(f"**{heading}**")
+                    st.dataframe(rows, hide_index=True, use_container_width=True)
+                if table_result.data.get("scan_truncated") or table_result.data.get("permission_errors"):
+                    st.warning("This file scan is partial; the displayed ranking or total may omit entries.")
+        size_result = next((item for item in tool_results if item.tool_name == "get_directory_size" and item.status == "success"), None)
+        if size_result is not None:
+            st.write(f"**Measured folder size:** {size_result.data.get('total_bytes', 0):,} bytes")
+            if not size_result.data.get("scan_complete"):
+                st.warning("The folder size is partial because the scan reached a limit or inaccessible entries.")
         memory_result = next((item for item in tool_results if item.tool_name == "get_memory_info" and item.status == "success"), None)
         if memory_result is not None:
             values = memory_result.data
@@ -168,6 +193,7 @@ def _render_supervisor_result(result):
             for tool_result in tool_results:
                 st.markdown(f"**{_display_label(tool_result.tool_name)} — {_display_label(tool_result.status)}**")
                 st.caption(tool_result.summary)
+                st.caption("Source: " + ("MCP" if tool_result.backend == "mcp" else "Direct Python" if tool_result.backend == "direct" else "Not reported"))
                 if tool_result.status == "success":
                     st.write(tool_result.data)
                     st.caption(f"Measured data · evidence ID: {tool_result.evidence_id}")
@@ -380,6 +406,10 @@ def _render_supervisor_result(result):
         st.write(f"**Reason and intended outcome:** {plan.intended_outcome}")
         st.write("**Expected effect:** " + "; ".join(plan.expected_effects))
         st.write("**Potential risk:** " + "; ".join(plan.potential_risks))
+        if plan.operation_metadata is not None:
+            st.write(f"**Operation class:** {plan.operation_metadata.risk_classification}")
+            st.write(f"**Permissions:** {plan.operation_metadata.required_permissions}")
+            st.write(f"**Reversibility:** {plan.operation_metadata.reversibility}")
         st.write("**Preconditions:** " + "; ".join(plan.preconditions))
         st.write(f"**Post-repair validation:** {plan.validator_id}")
         st.caption(f"Plan ID: {plan.plan_id}; fingerprint: {plan.fingerprint}")

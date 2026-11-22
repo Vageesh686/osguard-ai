@@ -12,6 +12,7 @@ from pydantic import BaseModel, ValidationError
 
 from osguard.config import ConfigurationError, GroqSettings, load_settings
 from osguard.groq_client import GroqProviderUnavailable, create_chat_model
+from osguard.privacy import redact_sensitive_text
 from osguard.schemas import SpecialistName, SpecialistResult, WorkflowError
 from osguard.state import OSGuardState
 
@@ -185,4 +186,4 @@ def shared_evidence_json(state: OSGuardState) -> str:
             for item in tool_results[:8]
         ],
     }
-    return json.dumps(payload, ensure_ascii=False, default=str)[:18000]
+    return redact_sensitive_text(json.dumps(payload, ensure_ascii=False, default=str))[:18000]

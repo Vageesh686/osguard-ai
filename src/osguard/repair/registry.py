@@ -15,6 +15,9 @@ class RepairRegistration:
     validator_id: str
     risk: str
     requires_administrator: bool
+    risk_classification: str = "CONTROLLED_CHANGE"
+    required_permissions: str = "standard_user"
+    approval_required: bool = True
 
 
 REPAIR_REGISTRY = MappingProxyType({

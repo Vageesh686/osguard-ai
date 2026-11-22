@@ -276,6 +276,56 @@ def get_service_status(service_name: str) -> ToolExecutionResult:
         return _result("get_service_status", "failed", "The requested service status could not be read.", error=type(exc).__name__)
 
 
+def get_system_uptime() -> ToolExecutionResult:
+    """Read the OS boot timestamp without running a command."""
+    if not _is_windows():
+        return _result("get_system_uptime", "unsupported_os", "Uptime is available only on Windows.")
+    try:
+        boot = float(psutil.boot_time())
+        now = time.time()
+        if boot <= 0 or boot > now:
+            raise ValueError("invalid_boot_time")
+        return _result("get_system_uptime", "success", "Read the current Windows uptime.", data={
+            "boot_epoch": boot, "uptime_seconds": round(now - boot),
+        })
+    except Exception as exc:
+        return _result("get_system_uptime", "failed", "Windows uptime could not be read.", error=type(exc).__name__)
+
+
+def list_services(*, limit: int = 30) -> ToolExecutionResult:
+    """List a bounded sample of Windows service status and start type."""
+    if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 50:
+        return _result("list_services", "invalid_input", "limit must be an integer from 1 to 50.")
+    if not _is_windows():
+        return _result("list_services", "unsupported_os", "Service listing is available only on Windows.")
+    services: list[dict[str, str]] = []
+    denied = scanned = 0
+    try:
+        for service in psutil.win_service_iter():
+            if scanned >= 300:
+                break
+            scanned += 1
+            try:
+                item = service.as_dict()
+                services.append({
+                    "service_name": str(item.get("name") or "")[:128],
+                    "display_name": str(item.get("display_name") or "")[:160],
+                    "status": str(item.get("status") or "unknown"),
+                    "start_type": str(item.get("start_type") or "unknown"),
+                })
+            except (psutil.AccessDenied, PermissionError):
+                denied += 1
+        services.sort(key=lambda item: item["service_name"].casefold())
+        return _result("list_services", "success", "Read accessible Windows service metadata.", data={
+            "services": services[:limit], "services_scanned": scanned,
+            "scan_cap_reached": scanned >= 300, "display_truncated": len(services) > limit,
+            "services_skipped_access_denied": denied,
+        })
+    except Exception as exc:
+        status = "permission_denied" if _permission_error(exc) else "failed"
+        return _result("list_services", status, "Windows services could not be listed.", error=type(exc).__name__)
+
+
 def _event_xpath(filters: dict[str, Any]) -> str:
     conditions = [f"TimeCreated[timediff(@SystemTime) <= {filters['hours_back'] * 3_600_000}]"]
     if filters["levels"]:

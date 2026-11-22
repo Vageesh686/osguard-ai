@@ -1,5 +1,28 @@
 # Errors and Environment Blockers
 
+## MCP integration check — 2026-11-22
+
+- The first sandboxed `pip install` attempt could not contact PyPI:
+  `WinError 10013` on the HTTPS socket. An approved install outside that
+  network sandbox installed official `mcp` 2.3.0 and its dependencies into
+  the existing Python 3.14 virtual environment. No package was reinstalled.
+- An SDK import inspection command failed at `pydantic_core` with
+  `ImportError: DLL load failed while importing _pydantic_core: An Application
+  Control policy has blocked this file.` This is the previously documented
+  host policy issue, now reproduced; the import command was not repeated.
+- The first focused pytest run stopped during collection at the same
+  `_pydantic_core` policy block, before any test body ran. No blocked test is
+  counted as passed. Source files were parsed with Python's `ast` module,
+  which does not import or execute project dependencies.
+- The single full-suite attempt stopped at collection of `tests/test_app_ui.py`
+  on the same `_pydantic_core` block: zero tests ran. It was not repeated.
+- A repository patch attempt timed out in the Windows sandbox helper before
+  opening `graph.py`. A subsequent smaller patch succeeded; no project code
+  was changed by the failed attempt.
+- The local MCP stdio smoke test and live Windows graph workflow are blocked
+  until the host permits `_pydantic_core`. No security setting was changed or
+  bypassed. Native FAISS remains separately blocked as previously recorded.
+
 ## Evidence-driven diagnostics check — 2026-11-22
 
 - Two focused development runs exposed local test/code issues: a syntax error

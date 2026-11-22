@@ -259,6 +259,11 @@ def _policy_review(
     if redacted_target:
         effects.append("A path or part of the command was redacted for privacy, so its target and complete effects remain unknown.")
     intent_match = finding.intent_match
+    if has_high_risk and re.search(r"\b(list|show|display|inspect|read)\b", request, re.I) and any(
+        name in _MUTATING_COMMANDS for name in command_names
+    ):
+        intent_match = "does_not_match"
+        effects.append("The proposed state-changing operation conflicts with the stated inspection intent.")
     if intent_match == "does_not_match":
         effective_risk = _rank_risk(max(_risk_rank(effective_risk), 1))
 

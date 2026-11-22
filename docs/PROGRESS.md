@@ -1,5 +1,86 @@
 # OSGuard AI Progress
 
+## Current milestone: Local MCP diagnostics integration — 2026-11-22
+
+**Implementation status:** A local stdio MCP diagnostic server and client are
+implemented in source. The existing Supervisor, three specialists, shared
+LangGraph state, FAISS/in-memory RAG, IEEE gate, approval interrupt, and
+restricted demo-cache repair remain in place. MCP does not expose a repair or
+generic command tool. Runtime completion is **blocked** by Windows Application
+Control on `_pydantic_core`; the new integration is not claimed as live verified.
+
+### Implemented changes
+
+- Added official Python MCP SDK 2.3.0 to the Python 3.14 virtual environment
+  and `mcp>=2.3,<3` plus `jsonschema>=4.20,<5` to the project manifest.
+  The server exposes 11 structured read-only tools: the six existing Windows
+  tools, known-folder largest-file/list/size scans, system uptime, and bounded
+  service listing. Stdio is the only configured transport.
+- The existing evidence collector now prefers MCP, discovers advertised
+  names, descriptions and JSON schemas, intersects them with a strict local
+  Pydantic argument registry, and makes at most four initial calls and one
+  follow-up in one session. Calls are not repeated by name. Connection,
+  discovery, per-call timeout and structured-result failures remain explicit.
+  A configurable direct Python fallback uses the same allowlist and is
+  reported separately in state, tool results and Streamlit.
+- Known folders are resolved through the Windows Known Folder API; the scanner
+  reads metadata only, rejects arbitrary folder strings and reparse points,
+  limits depth/entries/time, and labels partial results. Direct answers for
+  measured file, directory size, service state, memory-ranked process and
+  uptime questions precede broader diagnostic text. Simple local factual
+  checks skip unnecessary documentation retrieval. Official Get-ChildItem
+  and Remove-Item pages were added to the existing allowlisted source list
+  for command explanations, not execution permission.
+- Added `OperationMetadata` to exact repair plans for target, validated
+  parameters, effect, risk class, preconditions, permissions, reversibility,
+  validation and approval. It is included in the plan fingerprint. The only
+  executable registration is still `CLEAR_OSGUARD_DEMO_CACHE`; IEEE and exact
+  approval checks remain mandatory. Static command review now marks an
+  inspection request paired with a known mutating command as an intent
+  mismatch.
+- Added disposable filesystem and MCP protocol/client/collector regression
+  tests. Updated the Streamlit backend label, file/service tables, partial
+  scan warnings, and exact-plan presentation.
+
+### Actual verification and blockers
+
+- Static parse: **57 Python files parsed** with `ast.parse`; the Microsoft
+  source-list JSON parsed; `git diff --check` reported no whitespace errors.
+  `pip check` reported no broken dependency requirements. These checks do not
+  execute application code.
+- Focused pytest: **0 tests ran**. Collection failed while importing
+  `tests/test_evidence_diagnostics.py` because Windows Application Control
+  blocked `_pydantic_core`.
+- One full-suite attempt during this milestone:
+  `.\.venv\Scripts\python.exe -m pytest tests -q --maxfail=1 --disable-warnings`:
+  **0 tests ran**; collection stopped at `tests/test_app_ui.py` on the same
+  `_pydantic_core` block. No test is reported as passed. A local MCP stdio
+  smoke test and live Windows graph run could not be performed for the same
+  reason. No policy bypass, Python version switch, or repair was attempted.
+- Native FAISS remains independently blocked by Smart App Control. Filesystem
+  and MCP behavior have fixture tests in source but no successful runtime
+  verification in this environment. Directory scanning may be partial under
+  depth, entry, timeout or permission limits; no device/driver inventory was
+  added because a safe read-only API contract is not yet established.
+
+### Files and next check
+
+- Added `src/osguard/mcp/__init__.py`, `src/osguard/mcp/server.py`,
+  `src/osguard/mcp/client.py`, `src/osguard/tools/filesystem.py`,
+  `src/osguard/tools/registry.py`, `tests/test_filesystem_diagnostics.py`,
+  `tests/test_mcp_diagnostics.py`. Modified `src/osguard/context.py`,
+  `src/osguard/graph.py`, `src/osguard/state.py`, `src/osguard/schemas.py`,
+  `src/osguard/tools/windows.py`, `src/osguard/agents/diagnostic.py`,
+  `src/osguard/agents/command_verify.py`, `src/osguard/agents/_common.py`,
+  `src/osguard/repair/registry.py`, `src/osguard/repair/planning.py`, `app.py`,
+  `pyproject.toml`, `data/documentation_sources.json`, `README.md`,
+  `docs/ARCHITECTURE.md`, `docs/IMPLEMENTATION_GUIDE.md`, `ERRORS.md`, and
+  this progress report.
+- Once Windows permits `_pydantic_core` through its authorized process, run
+  focused MCP/filesystem tests, one full suite, an MCP stdio discovery/call
+  smoke test, and a manual Streamlit check. Fix any runtime defects those
+  checks reveal before claiming MCP is working live.
+
 ## Current milestone: Evidence-driven Windows diagnostics — 2026-11-22
 
 **Status:** The existing Supervisor → shared evidence collector → specialist

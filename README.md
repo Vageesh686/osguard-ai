@@ -1,6 +1,49 @@
 
 # OSGuard AI
 
+## Local MCP diagnostics (current development branch)
+
+OSGuard's existing LangGraph evidence collector now prefers a local MCP stdio
+server built with the official Python SDK. The client launches it with the
+project's Python 3.14 interpreter, discovers its approved tools and schemas,
+validates arguments again locally, makes a bounded set of calls, and closes
+the session. There is no public listener or MCP repair tool.
+
+The server wraps the existing Windows system, process, memory, disk, service,
+and event-log checks. It also exposes read-only known-folder metadata scans:
+`get_largest_files`, `list_directory`, and `get_directory_size` for Downloads,
+Documents, and Desktop. `get_system_uptime` and `list_services` provide bounded
+additional checks. File contents are never opened. Arbitrary paths, junctions,
+symlinks, and unapproved commands are not accepted. A limited or inaccessible
+scan is reported as partial.
+
+Install the project and test dependencies with
+`.\.venv\Scripts\python.exe -m pip install -e ".[test]"`, then run the local
+server for protocol clients with
+`.\.venv\Scripts\python.exe -m osguard.mcp.server`. That command reserves
+stdout for MCP; it waits for a stdio client. Normal use is through
+`.\.venv\Scripts\python.exe -m streamlit run app.py --server.address 127.0.0.1`.
+The UI reports **MCP active**, **Direct fallback active**, or **Diagnostic tools
+unavailable**, plus provenance for each tool result.
+
+Set `OSGUARD_DIAGNOSTIC_BACKEND=direct` to use the controlled Python tools
+without MCP. Set `OSGUARD_DIRECT_FALLBACK=0` to leave diagnostics unavailable
+when MCP cannot start. Direct fallback uses the same argument registry. The
+only enabled state-changing operation remains the exact OSGuard demo-cache
+repair after IEEE verification and LangGraph approval. MCP cannot execute it.
+
+The file scanners accept only named Windows known folders; add a new tool by
+implementing a bounded read-only function, registering its strict arguments in
+`src/osguard/tools/registry.py`, and exposing a wrapper in
+`src/osguard/mcp/server.py`. Then add a capability selection rule and fixture
+tests. Do not expose arbitrary path or command execution.
+
+**Current verification limit:** Windows Application Control is blocking
+`_pydantic_core` in this virtual environment, so the new MCP integration and
+pytest suite could not execute during this change. Source syntax checks passed;
+see `docs/PROGRESS.md` and `ERRORS.md` for exact results. Native FAISS remains
+blocked separately by Smart App Control.
+
 ### Multi-Agent Operating System Diagnostics, Verification and Controlled Self-Repair
 
 OSGuard AI is a Python-based multi-agent system designed to

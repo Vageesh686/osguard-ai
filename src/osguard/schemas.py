@@ -189,6 +189,7 @@ class ToolExecutionResult(StrictModel):
     data: dict[str, Any] = Field(default_factory=dict)
     evidence_id: str | None = None
     error: str | None = None
+    backend: Literal["mcp", "direct"] | None = None
 
 
 class CorrectiveActionCandidate(StrictModel):
@@ -293,6 +294,22 @@ class DemoCacheInspection(StrictModel):
     message: str = ""
 
 
+class OperationMetadata(StrictModel):
+    """Review metadata; executable authority still comes only from the registry."""
+
+    operation_id: str
+    target: str
+    validated_parameters: dict[str, str]
+    intended_effect: str
+    expected_changes: list[str]
+    risk_classification: Literal["READ_ONLY", "CONTROLLED_CHANGE", "BLOCKED"]
+    preconditions: list[str]
+    required_permissions: Literal["standard_user", "administrator", "unknown"]
+    reversibility: str
+    validation_method: str
+    approval_required: bool
+
+
 class RepairPlan(StrictModel):
     """An exact, immutable-by-fingerprint preview; not execution authority."""
 
@@ -308,6 +325,7 @@ class RepairPlan(StrictModel):
     requires_user_approval: Literal[True] = True
     validator_id: str
     pre_state: DemoCacheSnapshot
+    operation_metadata: OperationMetadata | None = None
     fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 

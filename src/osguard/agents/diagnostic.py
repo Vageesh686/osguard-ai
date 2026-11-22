@@ -294,6 +294,25 @@ def _measured_observations(tool_results: list[Any]) -> list[DiagnosticObservatio
                 f"The {data.get('log_name')} event log returned {data['count']} recent records.",
                 str(data["count"]),
             ))
+        elif result.tool_name == "get_largest_files":
+            for row in data.get("files", [])[:3]:
+                if isinstance(row, dict) and isinstance(row.get("size_bytes"), int):
+                    descriptions.append((
+                        f"File {row.get('relative_path', row.get('name'))} in {data.get('folder')} "
+                        f"was {row['size_bytes']:,} bytes in this metadata scan.",
+                        json.dumps(row, ensure_ascii=False, default=str),
+                    ))
+        elif result.tool_name == "get_directory_size" and isinstance(data.get("total_bytes"), int):
+            descriptions.append((
+                f"The inspected {data.get('folder')} folder contained {data['total_bytes']:,} bytes of file data"
+                + ("." if data.get("scan_complete") else " within the scan limits."),
+                str(data["total_bytes"]),
+            ))
+        elif result.tool_name == "get_system_uptime" and isinstance(data.get("uptime_seconds"), int):
+            descriptions.append((
+                f"Windows uptime was {data['uptime_seconds']:,} seconds at measurement time.",
+                str(data["uptime_seconds"]),
+            ))
         for description, quote in descriptions:
             if quote and _normalize(quote) in _normalize(json.dumps(data, ensure_ascii=False, default=str)):
                 observations.append(DiagnosticObservation(
