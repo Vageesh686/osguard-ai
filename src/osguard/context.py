@@ -64,6 +64,8 @@ def _known_folder(request: str) -> str | None:
 
 def _local_fact_question(state: OSGuardState) -> bool:
     request = state.get("user_request", "")
+    if re.search(r"\b(why|explain|documentation|guidance|troubleshoot|diagnos[ei])\b", request, re.I):
+        return False
     return bool(re.search(
         r"\b(which|what|show|list|is|how much|how many)\b.*\b"
         r"(file|folder|directory|downloads|documents|desktop|process|ram|memory|service|uptime|windows update)\b",

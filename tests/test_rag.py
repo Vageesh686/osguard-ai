@@ -1,13 +1,14 @@
 """FAISS RAG unit tests use deterministic embeddings and a local FAISS test double."""
 
 import json
+import hashlib
 from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
-from osguard.rag import ingest, memory, retriever
+from osguard.rag import ingest, knowledge_base, memory, retriever
 from osguard.rag.retriever import search_documentation
 from osguard.rag.sources import load_sources
 
@@ -312,3 +313,145 @@ def test_non_policy_faiss_load_error_does_not_activate_fallback(tmp_path, monkey
     assert result.status == "retrieval_error"
     assert result.backend == "unavailable"
     assert result.evidence == []
+
+
+def test_native_faiss_imports_on_this_environment():
+    import faiss
+
+    assert hasattr(faiss, "IndexFlatIP")
+
+
+def test_explicit_initialization_persists_and_reuses_verified_index(tmp_path, fake_faiss):
+    config = _source_config(tmp_path / "sources.json")
+    index_dir = tmp_path / "index"
+    calls = {"fetch": 0, "embed_documents": 0}
+
+    def fetch(_url):
+        calls["fetch"] += 1
+        return "<main><h1>CPU process</h1><p>Process CPU measurements can support an investigation, but one sample cannot prove the cause of sustained CPU use.</p></main>"
+
+    class CountingEmbeddings(_FakeEmbeddings):
+        def embed_documents(self, texts):
+            calls["embed_documents"] += 1
+            return super().embed_documents(texts)
+
+    encoder = CountingEmbeddings()
+    missing = knowledge_base.inspect_knowledge_base(index_dir=index_dir, embeddings=encoder)
+    assert missing.state == "index_missing"
+    assert missing.backend == "unavailable"
+
+    first = knowledge_base.initialize_knowledge_base(
+        index_dir=index_dir, source_config=config, fetcher=fetch, embeddings=encoder
+    )
+    assert first.state == "faiss_ready"
+    assert first.backend == "faiss" and first.retrieval_verified
+    assert all((index_dir / name).is_file() for name in (
+        "index.faiss", "manifest.json", "index.sha256.json"
+    ))
+    assert calls["fetch"] == 1
+    assert calls["embed_documents"] == 1
+
+    second = knowledge_base.initialize_knowledge_base(
+        index_dir=index_dir, source_config=config, fetcher=fetch, embeddings=encoder
+    )
+    assert second.state == "faiss_ready" and second.retrieval_verified
+    assert calls["fetch"] == 1
+    assert calls["embed_documents"] == 1
+
+    retriever.clear_index_cache()
+    reloaded = knowledge_base.inspect_knowledge_base(index_dir=index_dir, embeddings=encoder)
+    assert reloaded.state == "faiss_ready"
+    found = search_documentation("CPU process", index_dir=index_dir, embeddings=encoder)
+    assert found.status == "success" and found.backend == "faiss"
+    assert found.evidence[0].source_url == "https://learn.microsoft.com/test"
+
+
+def test_incomplete_corrupt_and_incompatible_indexes_can_be_rebuilt(tmp_path, fake_faiss):
+    config = _source_config(tmp_path / "sources.json")
+    index_dir = tmp_path / "index"
+    encoder = _FakeEmbeddings()
+    fetch = lambda _url: "<main><h1>CPU process</h1><p>Process CPU measurements can support an investigation, but one sample cannot prove the cause of sustained CPU use.</p></main>"
+    assert knowledge_base.initialize_knowledge_base(
+        index_dir=index_dir, source_config=config, fetcher=fetch, embeddings=encoder
+    ).state == "faiss_ready"
+
+    (index_dir / "index.sha256.json").unlink()
+    assert knowledge_base.inspect_knowledge_base(index_dir=index_dir, embeddings=encoder).state == "index_incomplete"
+    incomplete = search_documentation("CPU", index_dir=index_dir, embeddings=encoder)
+    assert incomplete.status == "index_missing" and "incomplete" in incomplete.message
+    assert knowledge_base.initialize_knowledge_base(
+        index_dir=index_dir, source_config=config, fetcher=fetch, embeddings=encoder
+    ).state == "faiss_ready"
+
+    manifest = index_dir / "manifest.json"
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    payload["chunks"][0]["url"] = "https://untrusted.example.invalid/page"
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+    receipt = index_dir / "index.sha256.json"
+    receipt_payload = json.loads(receipt.read_text(encoding="utf-8"))
+    receipt_payload["manifest_sha256"] = hashlib.sha256(manifest.read_bytes()).hexdigest()
+    receipt.write_text(json.dumps(receipt_payload), encoding="utf-8")
+    retriever.clear_index_cache(index_dir)
+    assert knowledge_base.inspect_knowledge_base(index_dir=index_dir, embeddings=encoder).state == "index_corrupt"
+    assert knowledge_base.initialize_knowledge_base(
+        index_dir=index_dir, source_config=config, fetcher=fetch, embeddings=encoder
+    ).state == "faiss_ready"
+
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    payload["chunks"][0]["url"] = "https://untrusted.example.invalid/page"
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+    retriever.clear_index_cache(index_dir)
+    assert knowledge_base.inspect_knowledge_base(index_dir=index_dir, embeddings=encoder).state == "index_corrupt"
+    assert search_documentation("CPU", index_dir=index_dir, embeddings=encoder).status == "index_corrupt"
+    assert knowledge_base.initialize_knowledge_base(
+        index_dir=index_dir, source_config=config, fetcher=fetch, embeddings=encoder
+    ).state == "faiss_ready"
+
+    class OtherEncoder(_FakeEmbeddings):
+        model_name = "another-local-model"
+
+    assert knowledge_base.inspect_knowledge_base(
+        index_dir=index_dir, embeddings=OtherEncoder()
+    ).state == "embedding_mismatch"
+    assert knowledge_base.initialize_knowledge_base(
+        index_dir=index_dir, source_config=config, fetcher=fetch, embeddings=OtherEncoder()
+    ).state == "faiss_ready"
+
+
+def test_initializer_does_not_fallback_for_other_native_failure(tmp_path, monkeypatch):
+    config = _source_config(tmp_path / "sources.json")
+    monkeypatch.setattr(
+        retriever, "_faiss_and_numpy",
+        lambda: (_ for _ in ()).throw(ImportError("native library missing")),
+    )
+    status = knowledge_base.initialize_knowledge_base(
+        index_dir=tmp_path / "index", source_config=config, embeddings=_FakeEmbeddings()
+    )
+    assert status.state == "faiss_unavailable" and status.backend == "unavailable"
+    assert not (tmp_path / "index" / "index.faiss").exists()
+
+
+def test_initializer_uses_fallback_only_for_recognized_native_block(tmp_path, monkeypatch):
+    config = _source_config(tmp_path / "sources.json")
+    attempts = {"fetch": 0}
+
+    def fetch(_url):
+        attempts["fetch"] += 1
+        return "<main><h1>CPU process</h1><p>Process CPU measurements can support an investigation, but one sample cannot prove the cause of sustained CPU use.</p></main>"
+
+    monkeypatch.setattr(
+        retriever, "_faiss_and_numpy",
+        lambda: (_ for _ in ()).throw(ImportError("Application Control policy has blocked this file")),
+    )
+    monkeypatch.setattr(memory, "fetch_document", fetch)
+    index_dir = tmp_path / "index"
+    status = knowledge_base.initialize_knowledge_base(
+        index_dir=index_dir, source_config=config, embeddings=_FakeEmbeddings()
+    )
+    assert status.state == "fallback_active"
+    assert status.backend == "in_memory" and status.retrieval_verified
+    assert attempts["fetch"] == 1
+    assert not (index_dir / "index.faiss").exists()
+    assert knowledge_base.inspect_knowledge_base(
+        index_dir=index_dir, source_config=config
+    ).state == "fallback_active"

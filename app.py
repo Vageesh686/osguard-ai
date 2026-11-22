@@ -97,7 +97,7 @@ def _render_supervisor_result(result):
         st.caption("Documentation retrieval was not required for this request.")
     else:
         backend_labels = {
-            "faiss": "FAISS available",
+            "faiss": "FAISS retrieval successful" if retrieval.status == "success" else "FAISS index active",
             "in_memory": "In-memory fallback active",
             "unavailable": "Retrieval unavailable",
         }
@@ -509,24 +509,60 @@ with st.expander("OSGuard disposable demo cache"):
 
 
 with st.expander("Documentation knowledge base"):
-    st.caption(
-        "Initialize the allowlisted Microsoft documentation before analysis. "
-        "On this device the in-memory fallback loads and embeds pages once per app process."
-    )
-    prepared = st.session_state.get("osguard_kb_initialization")
-    ready = prepared is not None and prepared.backend in {"faiss", "in_memory"}
-    if st.button("Initialize documentation", disabled=ready):
-        from osguard.rag.retriever import search_documentation
+    from osguard.privacy import redact_sensitive_text
+    from osguard.rag.knowledge_base import KnowledgeBaseStatus, inspect_knowledge_base, initialize_knowledge_base
 
-        with st.spinner("Loading the documentation knowledge base..."):
-            prepared = search_documentation("Windows troubleshooting", top_k=1)
+    st.caption("Build and verify the local index from allowlisted Microsoft documentation.")
+    try:
+        observed = inspect_knowledge_base()
+    except Exception as exc:
+        observed = KnowledgeBaseStatus(
+            "initialization_failed", "unavailable",
+            f"Documentation status check failed ({type(exc).__name__}: {redact_sensitive_text(str(exc))[:200]}).",
+            "data/faiss",
+        )
+    prepared = st.session_state.get("osguard_kb_initialization")
+    if not isinstance(prepared, KnowledgeBaseStatus):
+        prepared = None
+    status = prepared if (
+        prepared is not None
+        and prepared.state == observed.state
+        and prepared.backend == observed.backend
+        and prepared.generation == observed.generation
+    ) else observed
+    ready = status.retrieval_verified and status.state in {"faiss_ready", "fallback_active"}
+    if st.button("Initialize documentation", disabled=ready):
+        try:
+            with st.spinner("Downloading allowlisted pages, embedding chunks, and verifying retrieval..."):
+                prepared = initialize_knowledge_base()
+        except Exception as exc:
+            prepared = KnowledgeBaseStatus(
+                "initialization_failed", "unavailable",
+                f"Documentation initialization failed ({type(exc).__name__}: {redact_sensitive_text(str(exc))[:200]}).",
+                observed.index_dir,
+            )
         st.session_state["osguard_kb_initialization"] = prepared
-    if prepared is not None:
-        if ready or prepared.backend in {"faiss", "in_memory"}:
-            label = "FAISS" if prepared.backend == "faiss" else "In-memory fallback"
-            st.success(f"{label} knowledge base is ready for this app process.")
-        else:
-            st.warning(f"Documentation retrieval unavailable: {prepared.message}")
+        status = prepared
+    labels = {
+        "index_missing": "Not initialized",
+        "index_incomplete": "Incomplete index",
+        "index_corrupt": "Invalid index",
+        "embedding_mismatch": "Embedding model mismatch",
+        "faiss_unavailable": "FAISS unavailable",
+        "faiss_ready": "FAISS ready" if status.retrieval_verified else "FAISS index validated",
+        "fallback_active": "In-memory fallback active",
+        "initialization_failed": "Initialization failed",
+    }
+    st.write("**Status:** " + labels[status.state])
+    st.caption(status.message)
+    if status.state == "faiss_ready" and status.retrieval_verified:
+        st.success(status.message)
+    elif status.state == "fallback_active" and status.retrieval_verified:
+        st.info(status.message)
+    elif status.state == "initialization_failed":
+        st.error(status.message)
+    elif status.state in {"index_incomplete", "index_corrupt", "embedding_mismatch", "faiss_unavailable"}:
+        st.warning(status.message)
 
 
 user_request = st.text_area(

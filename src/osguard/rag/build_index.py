@@ -6,7 +6,7 @@ import argparse
 import json
 import sys
 
-from osguard.rag.ingest import build_index
+from osguard.rag.knowledge_base import initialize_knowledge_base
 
 
 def main() -> int:
@@ -19,9 +19,14 @@ def main() -> int:
         kwargs["source_config"] = options.sources
     if options.index_dir:
         kwargs["index_dir"] = options.index_dir
-    result = build_index(**kwargs)
-    print(json.dumps(result.model_dump(), indent=2))
-    return 0 if result.status in {"success", "partial_success"} else 1
+    result = initialize_knowledge_base(**kwargs)
+    print(json.dumps({
+        "status": result.state, "backend": result.backend,
+        "index_dir": result.index_dir, "document_count": result.document_count,
+        "retrieval_verified": result.retrieval_verified,
+        "message": result.message, "errors": result.errors,
+    }, indent=2))
+    return 0 if result.state == "faiss_ready" and result.retrieval_verified else 1
 
 
 if __name__ == "__main__":

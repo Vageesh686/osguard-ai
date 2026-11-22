@@ -37,6 +37,29 @@ not authorize another agent or another repair executor.
 The original blueprint below remains the architectural reference. Runtime
 verification status is in `docs/PROGRESS.md`.
 
+### Current FAISS preparation procedure (2026-11-22)
+
+The Streamlit **Documentation knowledge base** expander and
+`python -m osguard.rag.build_index` now use the same explicit initializer.
+It checks native FAISS availability and the trusted local `data/faiss/` index,
+downloads only entries in `data/documentation_sources.json` when a rebuild is
+needed, embeds with the configured local Sentence Transformers model, writes
+the persistent format-version-2 index, validates load/metadata/checksums, and
+verifies a search before reporting **FAISS ready**. A matching valid index is
+reused on later starts. Missing, partial, corrupt, or embedding-incompatible
+artifacts are distinguished and can be rebuilt. Index files are never accepted
+from a UI upload, and no pickle deserialization is enabled. The checksums are
+integrity checks, not cryptographic provenance for files an attacker can edit.
+
+Only the recognized native Application Control block enables the existing
+in-memory fallback; a missing index by itself does not. Fallback vectors stay
+in process memory. The UI reports index state separately from the actual
+retrieval backend and never labels fallback evidence as FAISS evidence.
+For a live read-only integration check after initialization, run
+`python scripts/check_mcp_faiss.py`. That check requires configured Groq and
+reachable Microsoft documentation only for the initial index build; it
+disables direct diagnostic fallback for its process and performs no repair.
+
 > **Status:** Implementation specification / college-project MVP (not a claim that code exists yet).  
 > **Target:** Windows 11, local-only, Streamlit, Python, LangGraph + LangChain, FAISS.  
 > **Time budget:** approximately 15 hours (3 × 5-hour sessions). This is an aggressive MVP target, not a guarantee.  

@@ -12,7 +12,6 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.error import URLError
 from urllib.request import Request, urlopen
 from typing import Any
 
@@ -20,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from osguard.rag.embeddings import LocalSentenceTransformerEmbeddings, get_local_embeddings
 from osguard.rag.sources import DEFAULT_SOURCE_CONFIG, DocumentationSource, load_sources
+from osguard.privacy import redact_sensitive_text
 
 
 DEFAULT_INDEX_DIR = Path(__file__).resolve().parents[3] / "data" / "faiss"
@@ -217,6 +217,11 @@ def build_index(
     after at least one valid chunk has been embedded successfully.
     """
     target = Path(index_dir)
+    if target.is_symlink() or (target.exists() and target.is_junction()):
+        return IndexBuildResult(
+            status="failed", index_dir=str(target),
+            errors=["Index directory is a link or junction; choose a local directory."],
+        )
     errors: list[str] = []
     documents: list[_Chunk] = []
     loaded_sources: list[str] = []
@@ -241,7 +246,7 @@ def build_index(
             documents.extend(source_chunks)
             loaded_sources.append(source.source_id)
         except Exception as exc:
-            errors.append(f"{source.source_id}: {type(exc).__name__}")
+            errors.append(f"{source.source_id}: {type(exc).__name__}: {redact_sensitive_text(str(exc))[:240]}")
 
     if not documents:
         return IndexBuildResult(
@@ -263,7 +268,8 @@ def build_index(
         index_tmp = target / f"index.{generation}.tmp"
         faiss.write_index(index, str(index_tmp))
         manifest = {
-            "format_version": 1,
+            "format_version": 2,
+            "producer": "osguard-ai",
             "generation": generation,
             "embedding_model": getattr(encoder, "model_name", "injected-test-encoder"),
             "dimension": int(matrix.shape[1]),
@@ -287,8 +293,10 @@ def build_index(
         # Included to detect accidental/no-op persistence mistakes without
         # depending on a native FAISS checksum API.
         checksum = hashlib.sha256((target / "index.faiss").read_bytes()).hexdigest()
+        manifest_checksum = hashlib.sha256((target / "manifest.json").read_bytes()).hexdigest()
         _atomic_write_json(
-            target / "index.sha256.json", {"generation": generation, "sha256": checksum}
+            target / "index.sha256.json",
+            {"generation": generation, "sha256": checksum, "manifest_sha256": manifest_checksum},
         )
         from osguard.rag.retriever import clear_index_cache
 
@@ -305,7 +313,7 @@ def build_index(
             document_count=len(loaded_sources),
             chunk_count=0,
             source_ids=loaded_sources,
-            errors=errors + [f"Index build: {type(exc).__name__}"],
+            errors=errors + [f"Index build: {type(exc).__name__}: {redact_sensitive_text(str(exc))[:240]}"],
         )
 
     return IndexBuildResult(

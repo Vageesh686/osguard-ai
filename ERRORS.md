@@ -1,5 +1,34 @@
 # Errors and Environment Blockers
 
+## FAISS initialization and live integration check — 2026-11-22
+
+- The missing-index message came from a real missing `data/faiss/index.faiss`.
+  Streamlit's old initialization control called the retriever instead of the
+  ingestion pipeline; it could not create the index. This is fixed by the
+  explicit preparation path shared with the CLI.
+- The first live build in the command sandbox failed for all 13 allowlisted
+  Microsoft sources with `URLError: [WinError 10013]` on HTTPS sockets. No
+  index was reported ready. An approved network-capable run downloaded the
+  sources, persisted 536 chunks, reloaded FAISS and verified retrieval.
+- The first sandboxed MCP + FAISS + Groq graph check returned
+  `provider_unavailable` at classification and ran no diagnostics. An approved
+  network-capable run completed with two successful MCP measurements, four
+  FAISS passages, a completed Diagnostic Agent, and no repair.
+- The initial focused test run had two development failures: a generic probe
+  phrase produced a zero vector in the deterministic fixture encoder, and the
+  local-fact shortcut skipped RAG for a request explicitly asking for
+  documentation. Both were fixed; the targeted rerun passed 2 tests, followed
+  by a 29-test focused run and a 14-test RAG validation run.
+- The old Smart App Control block on `faiss.dll` and `_pydantic_core` was not
+  reproduced in this current environment. No Windows security policy was
+  changed or bypassed by this work. Browser-driven Streamlit behavior remains
+  unverified.
+- The final complete pytest suite passed **189 tests** with **2 skips** for
+  unavailable Windows symlink privilege and **17 LangSmith deprecation
+  warnings**. A repository-wide `git diff --check` could not read existing
+  tracked `.test_tmp/` fixture files (`Permission denied`); those unrelated
+  files and the pre-existing archive change were left untouched.
+
 ## Resolved RAG documentation URL redaction — 2026-11-22
 
 - A RAG graph integration assertion reported that the retrieved Microsoft

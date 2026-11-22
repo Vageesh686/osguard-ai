@@ -1,5 +1,88 @@
 # OSGuard AI Progress
 
+## FAISS initialization and MCP integration — 2026-11-22
+
+**Status:** Native FAISS 1.16.0 imports on the current Python 3.14 Windows
+environment. The approved Microsoft corpus was built under `data/faiss/` with
+**536 chunks**, and a saved-index load and lookup were verified. A live
+LangGraph investigation combined **MCP** memory/process measurements with
+**FAISS** retrieval and a completed Groq-backed Diagnostic Agent. No repair
+ran and no Windows security setting was changed.
+
+### Cause and implementation
+
+- The Streamlit **Initialize documentation** button previously called
+  `search_documentation` only. With no `data/faiss/index.faiss`, that correctly
+  returned `index_missing`; no ingestion was started. Its static caption also
+  claimed the in-memory fallback was active on this device.
+- Added one explicit preparation path for Streamlit and the CLI. It inspects
+  native availability and the configured index, rebuilds a missing, partial,
+  corrupt, or embedding-incompatible index from the allowlisted sources,
+  reloads it, and verifies a bounded search before reporting **FAISS ready**.
+  A valid index is reused across questions and app restarts. A per-process
+  initialization lock prevents duplicate concurrent builds.
+- Format version 2 records generation/producer and hashes both native index
+  and JSON manifest. Load checks dimensions, chunk count, source hosts,
+  provenance IDs, size limits, and link/junction status before native load.
+  No pickle-based metadata deserialization is used. Checksums detect
+  corruption, not malicious replacement of all files; only locally generated
+  index artifacts are trusted.
+- The existing in-memory backend remains limited to the recognized native
+  Application Control block. A missing index is still explicit; no fabricated
+  evidence or silent fallback is reported. Public Microsoft URLs, evidence
+  IDs, scores, and section metadata continue into specialist prompts.
+- The evidence collector now keeps RAG enabled for explanatory requests that
+  explicitly ask why or request documentation, while simple local factual
+  questions continue to use only relevant MCP measurements.
+- Streamlit now shows missing, incomplete, invalid, model-mismatched,
+  unavailable, validated, verified FAISS, and verified fallback states. It
+  reports the actual initialization failure and distinguishes backend status
+  from a successful retrieval. A browser-driven UI session was not run.
+
+### Verification
+
+- Native `import faiss` reported **1.16.0**. The live initializer downloaded
+  the approved source pages, generated embeddings, persisted the three index
+  artifacts, and reported `faiss_ready`, `retrieval_verified=true`,
+  `document_count=536`, with no source errors. A later read-only status check
+  reloaded the saved index and found 536 chunks.
+- The live MCP + FAISS + Groq smoke check returned `diagnostic_backend=mcp`,
+  `retrieval_status=success`, `retrieval_backend=faiss`, **4 genuine Microsoft
+  passages**, successful `get_memory_info` and `get_process_stats` results,
+  a completed Diagnostic Agent, no graph errors, and `repair_executed=false`.
+  The fetched performance page is scoped as Windows Server guidance, so its
+  applicability to Windows 11 remains explicitly qualified.
+- Initial focused development run: **26 passed, 2 failed**. The failures were
+  a zero-vector generic readiness probe in a deterministic encoder and a
+  too-broad local-fact shortcut that skipped an explicit documentation request.
+  Both were fixed. Targeted rerun: **2 passed**. Later focused RAG/UI/graph
+  run: **29 passed**; additional RAG validation run: **14 passed**.
+- The first live index attempt inside the command sandbox failed to fetch
+  Microsoft pages with `WinError 10013`; an approved network-capable run
+  succeeded. The first sandboxed live graph attempt returned
+  `provider_unavailable` before diagnostics; the approved network-capable run
+  succeeded. The errors and their resolution are also in `ERRORS.md`.
+- Automated tests use fixture Microsoft HTML and deterministic embeddings for
+  most index cases; the graph integration test uses native FAISS with fixture
+  MCP results. The separate live smoke check used actual MCP, native FAISS,
+  Groq and host measurements. Streamlit rendering is covered with a local UI
+  test double, not a browser session.
+- One complete pytest suite run after implementation: **189 passed, 2 skipped,
+  17 warnings** in 17.37 seconds. The two skips need Windows symlink privilege
+  for disposable filesystem and repair fixtures; the warnings are LangSmith
+  deprecations of `asyncio.iscoroutinefunction` on Python 3.14.
+
+### Files and remaining work
+
+Changed `src/osguard/rag/ingest.py`, `retriever.py`, `memory.py`,
+`build_index.py`; added `src/osguard/rag/knowledge_base.py` and
+`scripts/check_mcp_faiss.py`; updated `src/osguard/context.py`, `app.py`,
+`tests/test_rag.py`, `tests/test_rag_graph_integration.py`,
+`tests/test_app_ui.py`, `README.md`, `docs/ARCHITECTURE.md`,
+`docs/IMPLEMENTATION_GUIDE.md`, `ERRORS.md`, and this report.
+The in-memory fallback still must fetch and embed once per process when used.
+Browser interaction and rerun behavior need manual Streamlit verification.
+
 ## RAG documentation URL redaction fix — 2026-11-22
 
 - Fixed the prompt privacy filter so a public HTTP(S) documentation URL keeps

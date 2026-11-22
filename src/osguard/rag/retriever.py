@@ -5,14 +5,16 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from threading import RLock
 from typing import Any
+from urllib.parse import urlparse
 
 from osguard.rag.embeddings import get_local_embeddings
 from osguard.rag.ingest import DEFAULT_INDEX_DIR, _faiss_and_numpy
-from osguard.rag.sources import DEFAULT_SOURCE_CONFIG
+from osguard.rag.sources import ALLOWED_SOURCE_HOSTS, DEFAULT_SOURCE_CONFIG
 from osguard.schemas import RetrievedEvidence, RetrievalResult
 
 
@@ -20,6 +22,9 @@ SUPPORTED_FILTERS = {"category", "os_version", "source_id"}
 DEFAULT_TOP_K = 4
 MAX_TOP_K = 8
 MIN_RELEVANCE = 0.18
+MAX_INDEX_BYTES = 256_000_000
+MAX_MANIFEST_BYTES = 25_000_000
+MAX_CHUNKS = 50_000
 
 
 @dataclass
@@ -28,6 +33,7 @@ class _LoadedIndex:
     chunks: list[dict[str, Any]]
     model_name: str
     stamp: tuple[int, int, int]
+    generation: str
 
 
 _CACHE: dict[str, _LoadedIndex] = {}
@@ -47,6 +53,14 @@ def clear_index_cache(index_dir: str | Path | None = None) -> None:
     from osguard.rag.memory import clear_memory_cache
 
     clear_memory_cache()
+
+
+def refresh_faiss_native_availability() -> None:
+    """Recheck a former policy failure when explicitly inspecting the index."""
+    global _FAISS_POLICY_BLOCKED
+    _faiss_and_numpy()
+    with _CACHE_LOCK:
+        _FAISS_POLICY_BLOCKED = False
 
 
 def _is_application_control_block(exc: BaseException) -> bool:
@@ -71,8 +85,18 @@ def _load_index(index_dir: Path) -> _LoadedIndex:
     faiss_path = index_dir / "index.faiss"
     manifest_path = index_dir / "manifest.json"
     checksum_path = index_dir / "index.sha256.json"
+    if index_dir.is_symlink() or (index_dir.exists() and index_dir.is_junction()):
+        raise ValueError("The index directory is a link or junction")
     if not faiss_path.is_file() or not manifest_path.is_file() or not checksum_path.is_file():
         raise FileNotFoundError("The local FAISS index has not been built")
+    if any(path.is_symlink() for path in (faiss_path, manifest_path, checksum_path)):
+        raise ValueError("Index artifacts must be local regular files")
+    if (
+        faiss_path.stat().st_size > MAX_INDEX_BYTES
+        or manifest_path.stat().st_size > MAX_MANIFEST_BYTES
+        or checksum_path.stat().st_size > 4096
+    ):
+        raise ValueError("Index artifacts exceed local size limits")
     stat = faiss_path.stat()
     manifest_stat = manifest_path.stat()
     checksum_stat = checksum_path.stat()
@@ -85,26 +109,59 @@ def _load_index(index_dir: Path) -> _LoadedIndex:
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     checksum = json.loads(checksum_path.read_text(encoding="utf-8"))
+    if not isinstance(manifest, dict) or not isinstance(checksum, dict):
+        raise ValueError("Index metadata must be JSON objects")
     if (
-        manifest.get("format_version") != 1
-        or not manifest.get("generation")
+        manifest.get("format_version") != 2
+        or manifest.get("producer") != "osguard-ai"
+        or not isinstance(manifest.get("generation"), str)
+        or re.fullmatch(r"[0-9a-f]{32}", manifest["generation"]) is None
         or manifest.get("generation") != checksum.get("generation")
         or not isinstance(manifest.get("chunks"), list)
+        or not isinstance(checksum.get("sha256"), str)
+        or re.fullmatch(r"[0-9a-f]{64}", checksum["sha256"]) is None
+        or not isinstance(checksum.get("manifest_sha256"), str)
+        or re.fullmatch(r"[0-9a-f]{64}", checksum["manifest_sha256"]) is None
     ):
         raise ValueError("Index metadata is incomplete or mismatched")
+    if hashlib.sha256(manifest_path.read_bytes()).hexdigest() != checksum.get("manifest_sha256"):
+        raise ValueError("FAISS manifest checksum does not match")
+    chunks = manifest["chunks"]
+    dimension = manifest.get("dimension")
+    if (
+        not chunks or len(chunks) > MAX_CHUNKS
+        or manifest.get("document_count") != len(chunks)
+        or not isinstance(dimension, int) or not 1 <= dimension <= 4096
+        or not isinstance(manifest.get("embedding_model"), str)
+        or not manifest["embedding_model"]
+    ):
+        raise ValueError("Index metadata has invalid dimensions or chunk count")
+    for chunk in chunks:
+        if not isinstance(chunk, dict) or any(
+            not isinstance(chunk.get(key), str) or not chunk[key]
+            for key in ("source_id", "chunk_id", "title", "url", "category", "passage")
+        ):
+            raise ValueError("Index metadata contains an invalid chunk")
+        url = urlparse(chunk["url"])
+        if url.scheme != "https" or url.hostname not in ALLOWED_SOURCE_HOSTS:
+            raise ValueError("Index metadata contains an unapproved source URL")
+        if not chunk["chunk_id"].startswith(chunk["source_id"] + "-"):
+            raise ValueError("Index metadata contains an invalid chunk ID")
+        if len(chunk["passage"]) > 6000:
+            raise ValueError("Index metadata contains an oversized passage")
     digest = hashlib.sha256(faiss_path.read_bytes()).hexdigest()
     if digest != checksum.get("sha256"):
         raise ValueError("FAISS index checksum does not match its manifest")
     faiss, _np = _faiss_and_numpy()
     index = faiss.read_index(str(faiss_path))
-    chunks = manifest["chunks"]
-    if index.ntotal != len(chunks) or index.d != int(manifest.get("dimension", -1)):
+    if index.ntotal != len(chunks) or index.d != dimension:
         raise ValueError("FAISS index shape does not match its metadata")
     snapshot = _LoadedIndex(
         index=index,
         chunks=chunks,
         model_name=str(manifest.get("embedding_model", "")),
         stamp=stamp,
+        generation=manifest["generation"],
     )
     with _CACHE_LOCK:
         _CACHE[key] = snapshot
@@ -189,7 +246,11 @@ def search_documentation(
             )
         return RetrievalResult(
             status="index_missing", query=query_text, backend="unavailable",
-            message="The local documentation index has not been built.", filters=filters,
+            message=(
+                "The local documentation index is incomplete; rebuild it."
+                if (path / "manifest.json").exists() or (path / "index.sha256.json").exists()
+                else "The local documentation index has not been built."
+            ), filters=filters,
         )
     try:
         snapshot = _load_index(path)

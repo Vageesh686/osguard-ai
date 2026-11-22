@@ -38,11 +38,10 @@ implementing a bounded read-only function, registering its strict arguments in
 `src/osguard/mcp/server.py`. Then add a capability selection rule and fixture
 tests. Do not expose arbitrary path or command execution.
 
-**Current verification limit:** Windows Application Control is blocking
-`_pydantic_core` in this virtual environment, so the new MCP integration and
-pytest suite could not execute during this change. Source syntax checks passed;
-see `docs/PROGRESS.md` and `ERRORS.md` for exact results. Native FAISS remains
-blocked separately by Smart App Control.
+**Current verification:** Python 3.14, Pydantic Core, native FAISS, Groq, and
+the local MCP diagnostic path work in the current development environment.
+A read-only live memory investigation used MCP and the persisted FAISS index
+together. See `docs/PROGRESS.md` for exact results and remaining manual checks.
 
 ### Multi-Agent Operating System Diagnostics, Verification and Controlled Self-Repair
 
@@ -172,6 +171,14 @@ lookup needs network access to the Microsoft pages; later lookups in the same
 process reuse the in-memory index. No embedding service is called. The UI shows
 whether FAISS, the in-memory fallback, or neither backend served the request.
 Failed retrieval returns no citations.
+
+Open **Documentation knowledge base** in Streamlit and select **Initialize
+documentation** to download the allowlisted pages, embed chunks, persist the
+FAISS index under `data/faiss/`, reload and validate it, and verify one search.
+The UI distinguishes a missing or incomplete index, a validated FAISS index,
+a verified FAISS lookup, an active in-memory fallback, and initialization
+failure. Repeating initialization reuses a valid index. The command-line
+equivalent is `python -m osguard.rag.build_index` in the project environment.
 
 Generate explanations that distinguish supporting evidence
 from possible diagnostic hypotheses.
@@ -339,7 +346,8 @@ measurements and retrieved documentation where available. The exact request
 `Clear the OSGuard demo cache.` uses a fixed local route without a Groq call.
 After explicit fixture preparation and exact-plan approval, it can clear only
 that disposable cache. Submitted commands are never executed. Configure `.env`
-and, where native FAISS is allowed, build the local documentation index once:
+and build the local documentation index once, either with the Streamlit
+**Initialize documentation** button or this command:
 
 ```powershell
 .\.venv\Scripts\python.exe -m osguard.rag.build_index
@@ -350,9 +358,21 @@ Index construction fetches only the Microsoft URLs listed in
 embeddings. The first build needs network access to those sources and may
 download the embedding model. Later requests reuse the persisted `data/faiss/`
 index instead of rebuilding it. The generated index is local and gitignored.
-On this host Smart App Control blocks `faiss.dll`, so this build remains
-unavailable. Streamlit instead builds an in-memory index on its first
-documentation lookup while the approved Microsoft URLs are reachable.
+The current development machine successfully initialized 536 chunks and
+verified native FAISS retrieval. The CLI exits successfully only after a
+validated FAISS load and a search. If the native library is blocked by the
+documented Application Control policy on another machine, the app can use its
+process-cached in-memory fallback; a missing FAISS index alone does not
+activate that fallback.
+
+Only locally generated, trusted `data/faiss/` artifacts should be loaded.
+The index uses a native FAISS file and JSON metadata, with checksums and
+source-host/shape validation. It does not use pickle deserialization. The
+checksums detect accidental alteration but are not cryptographic proof of
+origin; do not copy untrusted index files into this directory. If files are
+missing, incomplete, corrupt, or from a different embedding model, use the
+initialization button or CLI to rebuild from the allowlisted sources.
+
 Then start Streamlit:
 
 ```powershell
@@ -472,8 +492,10 @@ post-repair measurement. Other tests use deterministic models and tools; no
 test calls Groq, runs PowerShell, or repairs Windows. Phase 6 separately
 verified live Groq calls, local embeddings, read-only Windows tools, and
 Streamlit startup. A later live fallback lookup retrieved real Microsoft
-passages. Native FAISS loading and browser-based Streamlit interaction remain
-unverified. Exact results are in `docs/PROGRESS.md`.
+passages. Native FAISS now also loads and retrieves from the local persistent
+index, and a live MCP + FAISS + Groq memory investigation succeeded.
+Browser-based Streamlit interaction remains a manual check. Exact results are
+in `docs/PROGRESS.md`.
 
 See docs/PROGRESS.md for actual implementation status
 and test results.
@@ -490,7 +512,7 @@ and test results.
 - [x] Add controlled execution for the disposable OSGuard demo cache only
 - [x] Implement post-repair validation for that action
 - [x] Add mocked Phase 3 and Phase 4 integration coverage
-- [ ] Verify native FAISS indexing and retrieval after the existing policy block is resolved
+- [x] Verify native FAISS indexing, persistence and retrieval on this machine
 - [x] Verify live Groq structured classification, three specialists, and read-only Windows tools
 - [ ] Prepare final demonstration
 
@@ -508,13 +530,13 @@ It does not aim to provide:
 - Automatic administrator-level repairs
 - Production-grade endpoint management
 
-The current Windows environment blocks FAISS's unsigned `faiss.dll` under
-Smart App Control. Python surfaces this while importing `_swigfaiss`.
-The automated suite uses a deterministic FAISS test double, so native index
-construction and retrieval still need verification after the approved resolution
-of that restriction. No security policy was changed. The fallback retrieved
-real Microsoft passages with the local embedding model, but it needs network
-access on first use in each application process and does not persist its index.
+The earlier Smart App Control block on FAISS is not present in the current
+development environment. Native FAISS 1.16.0 built and loaded the local index,
+and a live graph run combined FAISS retrieval with MCP measurements and Groq.
+No security policy was changed by OSGuard. The in-memory fallback still needs
+network access on first use in each process and does not persist its index.
+The Microsoft performance page retrieved in the live memory check is marked
+as Windows Server guidance, so applicability to Windows 11 needs care.
 Browser-based Streamlit approval and operation of the demo repair outside
 isolated pytest fixtures still require manual Windows verification. The local
 checkpoint and execution ledger are process-memory
@@ -529,6 +551,8 @@ contents.
 
 ```powershell
 .\.venv\Scripts\python.exe scripts/verify_windows_tools.py
+.\.venv\Scripts\python.exe -m osguard.rag.build_index
+.\.venv\Scripts\python.exe scripts/check_mcp_faiss.py
 .\.venv\Scripts\python.exe test_groq.py
 .\.venv\Scripts\python.exe -m pytest -q
 .\.venv\Scripts\python.exe -m streamlit run app.py --server.address 127.0.0.1
@@ -551,11 +575,13 @@ In Streamlit, try these requests separately:
    request again, choose **APPROVE**, and confirm post-repair inspection reports
    the actual result. Refresh the page to confirm it does not submit again.
 
-If Smart App Control blocks `faiss.dll`, the UI should show **In-memory fallback
-active** when the Microsoft pages are reachable. If they cannot be loaded, it
-should show **Retrieval unavailable** with no citations. After an approved
-resolution of the native block, build the FAISS index with the command above
-and confirm the UI shows **FAISS available**.
+In Streamlit, open **Documentation knowledge base**. With no index it should
+show **Not initialized** while FAISS is available. Select **Initialize
+documentation** and wait for **FAISS ready** after a verified search. A later
+analysis should report **FAISS retrieval successful** and show linked evidence.
+If Smart App Control blocks `faiss.dll` on another device, the UI should show
+**In-memory fallback active** only after its own retrieval succeeds. If neither
+backend can retrieve, it should show an explicit error and no citations.
 
 ## 14. Project Documentation
 

@@ -70,7 +70,17 @@ class _FakeStreamlit(ModuleType):
         return record
 
 
-def _load_app_with_fake_streamlit(monkeypatch, *, button_returns=None):
+def _load_app_with_fake_streamlit(monkeypatch, *, button_returns=None, kb_status=None, kb_initializer=None):
+    from osguard.rag import knowledge_base
+
+    if kb_status is None:
+        kb_status = knowledge_base.KnowledgeBaseStatus(
+            "index_missing", "unavailable", "FAISS available. Documentation index not built.",
+            "fixture-index",
+        )
+    monkeypatch.setattr(knowledge_base, "inspect_knowledge_base", lambda: kb_status)
+    if kb_initializer is not None:
+        monkeypatch.setattr(knowledge_base, "initialize_knowledge_base", kb_initializer)
     fake_streamlit = _FakeStreamlit()
     fake_streamlit.button_returns.update(button_returns or {})
     monkeypatch.setitem(sys.modules, "streamlit", fake_streamlit)
@@ -78,24 +88,56 @@ def _load_app_with_fake_streamlit(monkeypatch, *, button_returns=None):
     return namespace["_render_supervisor_result"], fake_streamlit
 
 
-def test_initialize_documentation_prewarms_without_groq(monkeypatch):
-    from osguard.rag import retriever
+def test_initialize_documentation_builds_and_verifies_without_groq(monkeypatch):
+    from osguard.rag.knowledge_base import KnowledgeBaseStatus
 
     calls = []
-    def prepared(query, *, top_k):
-        calls.append((query, top_k))
-        return RetrievalResult(status="success", query=query, backend="in_memory")
-
-    monkeypatch.setattr(retriever, "search_documentation", prepared)
+    def initialize():
+        calls.append("initialize")
+        return KnowledgeBaseStatus(
+            "faiss_ready", "faiss", "FAISS documentation index ready; retrieval verified.",
+            "fixture-index", document_count=2, retrieval_verified=True,
+        )
     _, fake_st = _load_app_with_fake_streamlit(
-        monkeypatch, button_returns={"Initialize documentation": True}
+        monkeypatch, button_returns={"Initialize documentation": True},
+        kb_initializer=initialize,
     )
-    assert calls == [("Windows troubleshooting", 1)]
-    assert fake_st.session_state["osguard_kb_initialization"].backend == "in_memory"
+    assert calls == ["initialize"]
+    assert fake_st.session_state["osguard_kb_initialization"].backend == "faiss"
     assert any(
-        name == "success" and "In-memory fallback knowledge base is ready" in str(args)
+        name == "success" and "retrieval verified" in str(args)
         for name, args, _kwargs in fake_st.calls
     )
+
+
+def test_documentation_index_missing_and_failed_initialization_stay_explicit(monkeypatch):
+    from osguard.rag.knowledge_base import KnowledgeBaseStatus
+
+    failure = KnowledgeBaseStatus(
+        "initialization_failed", "unavailable", "Documentation initialization failed: offline",
+        "fixture-index", errors=("offline",),
+    )
+    _, fake_st = _load_app_with_fake_streamlit(
+        monkeypatch, button_returns={"Initialize documentation": True},
+        kb_initializer=lambda: failure,
+    )
+    assert any(name == "write" and "Initialization failed" in str(args) for name, args, _ in fake_st.calls)
+    assert any(name == "error" and "offline" in str(args) for name, args, _ in fake_st.calls)
+    assert any(name == "button" and args == ("Initialize documentation",) and not kwargs["disabled"]
+               for name, args, kwargs in fake_st.calls)
+
+
+def test_documentation_fallback_status_does_not_claim_faiss_ready(monkeypatch):
+    from osguard.rag.knowledge_base import KnowledgeBaseStatus
+
+    fallback = KnowledgeBaseStatus(
+        "fallback_active", "in_memory", "In-memory documentation fallback active.",
+        "fixture-index", retrieval_verified=True,
+    )
+    _, fake_st = _load_app_with_fake_streamlit(monkeypatch, kb_status=fallback)
+    labels = [str(args) for name, args, _ in fake_st.calls if name == "write"]
+    assert any("In-memory fallback active" in label for label in labels)
+    assert not any("FAISS ready" in label for label in labels)
 
 
 def _base_result(*, specialist_status, workflow_status, message):
@@ -233,7 +275,7 @@ def test_streamlit_ui_renders_retrieved_source_and_tool_measurement(monkeypatch)
     assert any(name == "markdown" and "learn.microsoft.com/cpu" in str(args) for name, args in rendered)
     assert any(name == "write" and "utilization_percent" in str(args) for name, args in rendered)
     assert any(name == "caption" and "measured data" in str(args).casefold() for name, args in rendered)
-    assert any(name == "write" and "FAISS available" in str(args) for name, args in rendered)
+    assert any(name == "write" and "FAISS retrieval successful" in str(args) for name, args in rendered)
 
 
 def test_streamlit_ui_shows_memory_process_table_and_raw_result(monkeypatch):

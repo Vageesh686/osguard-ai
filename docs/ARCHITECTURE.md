@@ -118,8 +118,23 @@ pages. The indexer accepts HTTPS sources only from `learn.microsoft.com` or
 `support.microsoft.com`, extracts and cleans HTML, preserves section metadata,
 chunks text, generates local Sentence Transformers embeddings, and stores a
 FAISS inner-product index plus JSON metadata and checksums under `data/faiss/`.
-The index and metadata are loaded once and cached; the application does not
-rebuild the index per request. The local embedding model is cached separately.
+The Streamlit initialization control and `python -m osguard.rag.build_index`
+both call the same preparation function: inspect the configured index, build
+from the allowlisted pages only when needed, reload the artifacts, and verify
+one search. The index and metadata are loaded once and cached; the application
+does not rebuild the index per request. The local embedding model is cached
+separately. Ingestion and retrieval use the same `data/faiss/` default and
+embedding-model identity.
+
+The local format contains `index.faiss`, `manifest.json`, and
+`index.sha256.json`. Format version 2 records the producing app and a generation,
+and checksums cover both the native index and manifest. Loading rejects links,
+junctions, oversized files, invalid shapes, incompatible embedding models, and
+source URLs outside the approved Microsoft hosts. No LangChain pickle metadata
+or unsafe pickle deserialization is used. These checks detect corruption and
+accidental changes, not a malicious actor who can replace all local artifacts;
+only locally generated artifacts in the app-controlled index directory are
+trusted. Incomplete or incompatible indexes can be rebuilt from sources.
 
 Search is bounded to at most eight passages (four by default) and supports exact
 metadata filters for category, OS version, and source ID. Empty queries, missing
@@ -135,8 +150,10 @@ LangChain `InMemoryVectorStore` and the existing local embedding model. That
 store uses cosine similarity. It is cached once per process for each source
 configuration and embedding instance; subsequent queries embed only the query.
 The fallback requires network access when first constructed and is not
-persisted. The result carries an explicit backend label; failed construction
-returns no evidence or citations. Other FAISS errors do not trigger fallback.
+persisted. It activates only for the recognized Application Control native
+block; an unbuilt FAISS index remains an explicit missing-index status. The
+result carries an explicit backend label; failed construction returns no
+evidence or citations. Other FAISS errors do not trigger fallback.
 
 ## Read-only Windows tools
 

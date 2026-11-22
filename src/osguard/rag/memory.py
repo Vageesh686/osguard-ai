@@ -32,6 +32,13 @@ def clear_memory_cache() -> None:
         _CACHE.clear()
 
 
+def has_cached_memory_index(source_config: str | Path = DEFAULT_SOURCE_CONFIG) -> bool:
+    """Report an already-built fallback without downloading or embedding."""
+    source_path = str(Path(source_config).resolve())
+    with _CACHE_LOCK:
+        return any(key[0] == source_path for key in _CACHE)
+
+
 def _load_memory_index(source_config: str | Path, embeddings: Any) -> _MemoryIndex:
     key = (str(Path(source_config).resolve()), id(embeddings))
     with _CACHE_LOCK:

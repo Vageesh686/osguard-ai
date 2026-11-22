@@ -6,7 +6,8 @@ import pytest
 from langchain_core.runnables import RunnableLambda
 
 from osguard.graph import build_supervisor_graph
-from osguard.rag import memory, retriever
+from osguard.mcp.client import MCPCollection
+from osguard.rag import ingest, memory, retriever
 from osguard.schemas import (
     DiagnosticAgentOutput, DiagnosticHypothesis, OSSubsystem, ProblemType,
     RequestIntent, RetrievalResult, SpecialistName, SupervisorClassification,
@@ -135,3 +136,83 @@ def test_graph_does_not_claim_documentation_after_retrieval_failure():
     assert _prompt_evidence(model)["documentation_passages"] == []
     assert "retrieved documentation" not in result["final_response"].message
     assert "No documentation passages were used." in result["final_response"].message
+
+
+def test_real_faiss_retrieval_and_mock_mcp_measurements_reach_diagnostic_prompt(tmp_path):
+    source = {
+        "source_id": "memory-doc", "title": "Memory guidance",
+        "url": "https://learn.microsoft.com/test/memory", "os_version": "Windows 11",
+        "category": "memory",
+    }
+    config = tmp_path / "sources.json"
+    config.write_text(json.dumps([source]), encoding="utf-8")
+    html = (
+        "<main><h1>Memory guidance</h1><p>Memory measurements and process working "
+        "sets can support an investigation but cannot alone prove why memory usage is high.</p></main>"
+    )
+    index_dir = tmp_path / "index"
+    encoder = _Embeddings()
+    assert ingest.build_index(
+        source_config=config, index_dir=index_dir,
+        fetcher=lambda _url: html, embeddings=encoder,
+    ).status == "success"
+    classification = SupervisorClassification(
+        intent=RequestIntent.DIAGNOSE, problem_type=ProblemType.MEMORY,
+        os_subsystems=[OSSubsystem.MEMORY], selected_specialists=[SpecialistName.DIAGNOSTIC],
+    )
+    evidence_id = "memory-doc#memory-doc-0000"
+    model = _CapturingModel(DiagnosticAgentOutput(
+        reported_symptoms=["high RAM usage"],
+        hypotheses=[DiagnosticHypothesis(
+            description="The process snapshot may help explain memory use.",
+            supporting_evidence_ids=[evidence_id],
+            supporting_quotes=["Memory measurements and process working sets can support an investigation"],
+            uncertainty="The cause remains unconfirmed.",
+        )],
+    ))
+    called = []
+
+    def mcp_fixture(planner, follow_up):
+        available = {
+            "get_memory_info": "Physical memory",
+            "get_process_stats": "Processes by working set",
+            "get_system_info": "Windows version",
+        }
+        selected = planner(available)
+        called.extend(name for name, _ in selected)
+        results = [ToolExecutionResult(
+            tool_name=name, status="success", summary=f"Fixture {name} measurement",
+            evidence_id=f"tool:{name}:fixture", backend="mcp",
+            data={"total_bytes": 1000, "used_bytes": 600, "available_bytes": 400,
+                  "utilization_percent": 60.0} if name == "get_memory_info" else
+                 {"sort_by": "memory", "processes": [{"name": "fixture.exe", "pid": 1,
+                    "memory_bytes": 300}]} if name == "get_process_stats" else
+                 {"os_name": "Windows 11"},
+        ) for name, _ in selected]
+        assert follow_up(results) == []
+        return MCPCollection(results=results, available=available, selected=selected)
+
+    graph = build_supervisor_graph(
+        classifier=lambda _request: classification, model=model,
+        retriever=lambda query: retriever.search_documentation(
+            query, index_dir=index_dir, source_config=config, embeddings=encoder
+        ),
+        diagnostic_backend="mcp", mcp_runner=mcp_fixture,
+    )
+    result = graph.invoke(make_initial_state(
+        "Why is my PC using so much RAM? Check memory and processes and explain using Microsoft documentation."
+    ))
+    assert result["diagnostic_backend"] == "mcp"
+    assert {"get_memory_info", "get_process_stats"}.issubset(called)
+    assert result["retrieval_result"].status == "success"
+    assert result["retrieval_result"].backend == "faiss"
+    prompt = _prompt_evidence(model)
+    passage = prompt["documentation_passages"][0]
+    assert passage["evidence_id"] == evidence_id
+    assert passage["source_url"] == source["url"]
+    assert passage["metadata"]["category"] == "memory"
+    assert passage["metadata"]["relevance_score"] > 0
+    assert {item["evidence_id"] for item in prompt["read_only_tool_results"]} >= {
+        "tool:get_memory_info:fixture", "tool:get_process_stats:fixture"
+    }
+    assert "retrieved documentation" in result["final_response"].message

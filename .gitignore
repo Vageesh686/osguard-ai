@@ -10,3 +10,4 @@ build/
 dist/
 .streamlit/secrets.toml
 osguard-review*.zip
+.test_tmp/
