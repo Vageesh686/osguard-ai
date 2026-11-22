@@ -1,5 +1,30 @@
 # OSGuard AI — Complete Implementation Blueprint for Codex
 
+## Extended read-only diagnostics addendum (2026-11-22)
+
+The frozen Supervisor, collector, specialists, IEEE, and approval graph now
+supports bounded device, network, Windows Update, and application inventories
+through the existing local MCP server. The collector selects up to four
+relevant initial tools from classification and user intent and one distinct
+follow-up when evidence warrants it. Tools are only available when their
+names are in `tools/registry.py`, arguments pass strict Pydantic validation
+and the advertised MCP schema, and server wrappers exist. Direct fallback
+uses the same registry. No unrestricted PowerShell interface exists.
+
+New schemas include validated device class/status/identifier filters,
+bounded result limits, one allowlisted connectivity target, and bounded
+application-name filters. Fixed read-only CIM and PnPUtil inventory, psutil
+and read-only network registry metadata, local Update history, uninstall
+registry names/versions, and bounded Application crash events provide evidence.
+No update scan, driver change, service restart, registry write, arbitrary
+probe, or additional repair operation is authorized. Microsoft documentation
+remains reference evidence, never command authority.
+
+To add another capability, implement a bounded read-only collector, register
+its strict client argument model and MCP wrapper, add a selective collector
+rule, then add fixtures for success, partial/denied results, schema rejection,
+provenance, and no mutation.
+
 ## MCP diagnostics implementation addendum (2026-11-22)
 
 This addendum extends the approved read-only tool boundary in the frozen

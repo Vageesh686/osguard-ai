@@ -52,6 +52,15 @@ actual text and cite their evidence IDs.
 Do not invent CPU/memory/disk values, processes, Windows versions, event IDs,
 application versions, or other host facts. Failed tools provide no measured
 evidence. If a claim cannot be tied to supplied data, omit it and ask for it.
+For devices, report exact problem codes and distinguish disabled, disconnected,
+missing-driver, and other reported-problem states. A nonzero code alone does
+not establish a driver fault. A failed connectivity probe does not identify
+whether the adapter, gateway, DNS, or remote endpoint caused the failure.
+Windows Update history and application crash events establish recorded outcomes,
+not the root cause of the user's current symptom. Never treat an unrelated
+event as a confirmed cause.
+A bounded device inventory with no problem rows does not establish that every
+driver is healthy or that an intermittent problem cannot exist.
 
 Offer only non-invasive information-gathering steps, such as viewing a status
 or copying an error message. Do not provide shell/PowerShell commands, ask for
@@ -313,6 +322,66 @@ def _measured_observations(tool_results: list[Any]) -> list[DiagnosticObservatio
                 f"Windows uptime was {data['uptime_seconds']:,} seconds at measurement time.",
                 str(data["uptime_seconds"]),
             ))
+        elif result.tool_name in {"inspect_problem_devices", "inspect_device_status"}:
+            for row in data.get("devices", [])[:5]:
+                if isinstance(row, dict) and row.get("name"):
+                    descriptions.append((
+                        f"Device {row['name']} reported {row.get('status', 'unknown')} status "
+                        f"with Configuration Manager problem code {row.get('problem_code')}.",
+                        json.dumps(row, ensure_ascii=False, default=str),
+                    ))
+        elif result.tool_name == "inspect_device_drivers":
+            for row in data.get("drivers", [])[:3]:
+                if isinstance(row, dict) and row.get("name"):
+                    descriptions.append((
+                        f"Device {row['name']} has reported driver version "
+                        f"{row.get('driver_version') or 'unavailable'} from {row.get('provider') or 'unknown provider'}.",
+                        json.dumps(row, ensure_ascii=False, default=str),
+                    ))
+        elif result.tool_name == "inspect_network_adapters":
+            for row in data.get("adapters", [])[:5]:
+                if isinstance(row, dict) and row.get("name"):
+                    descriptions.append((
+                        f"Network adapter {row['name']} reported operational state "
+                        f"{'up' if row.get('is_up') else 'down'}.",
+                        json.dumps(row, ensure_ascii=False, default=str),
+                    ))
+        elif result.tool_name in {"get_network_configuration", "inspect_dns_configuration"}:
+            for row in data.get("interfaces", [])[:3]:
+                if isinstance(row, dict) and row.get("name"):
+                    descriptions.append((
+                        f"Network interface {row['name']} configuration was read by {result.tool_name}.",
+                        json.dumps(row, ensure_ascii=False, default=str),
+                    ))
+        elif result.tool_name == "check_network_connectivity" and data.get("connected") is True:
+            descriptions.append((
+                f"TCP connection to approved endpoint {data.get('host')} succeeded.",
+                str(data.get("host")),
+            ))
+        elif result.tool_name in {"get_windows_update_history", "inspect_failed_updates"}:
+            for row in data.get("updates", [])[:5]:
+                if isinstance(row, dict) and row.get("title"):
+                    descriptions.append((
+                        f"Windows Update history recorded {row['title']} as {row.get('status')} "
+                        f"at {row.get('installed_at') or 'unknown time'}.",
+                        json.dumps(row, ensure_ascii=False, default=str),
+                    ))
+        elif result.tool_name == "inspect_installed_software":
+            for row in data.get("applications", [])[:3]:
+                if isinstance(row, dict) and row.get("name"):
+                    descriptions.append((
+                        f"Installed software inventory includes {row['name']} version "
+                        f"{row.get('version') or 'unavailable'}.",
+                        json.dumps(row, ensure_ascii=False, default=str),
+                    ))
+        elif result.tool_name == "inspect_application_errors":
+            for row in data.get("events", [])[:3]:
+                if isinstance(row, dict) and row.get("event_id") is not None:
+                    descriptions.append((
+                        f"Application event {row['event_id']} was recorded at "
+                        f"{row.get('time_created') or 'unknown time'}.",
+                        json.dumps(row, ensure_ascii=False, default=str),
+                    ))
         for description, quote in descriptions:
             if quote and _normalize(quote) in _normalize(json.dumps(data, ensure_ascii=False, default=str)):
                 observations.append(DiagnosticObservation(

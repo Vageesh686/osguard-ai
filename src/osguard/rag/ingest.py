@@ -271,6 +271,7 @@ def build_index(
             "format_version": 2,
             "producer": "osguard-ai",
             "generation": generation,
+            "source_config_sha256": hashlib.sha256(Path(source_config).read_bytes()).hexdigest(),
             "embedding_model": getattr(encoder, "model_name", "injected-test-encoder"),
             "dimension": int(matrix.shape[1]),
             "document_count": len(documents),

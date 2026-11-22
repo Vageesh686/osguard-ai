@@ -19,7 +19,7 @@ from osguard.schemas import ToolExecutionResult
 
 _SERVICE_NAME = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 _ALLOWED_LOGS = {"Application", "System", "Setup"}
-_ALLOWED_EVENT_FILTERS = {"log_name", "hours_back", "event_ids", "levels", "max_events"}
+_ALLOWED_EVENT_FILTERS = {"log_name", "hours_back", "event_ids", "levels", "max_events", "provider_name"}
 _MAX_PROCESS_SCAN = 200
 _MAX_MEMORY_PROCESS_SCAN = 500
 _MAX_DISK_PARTITIONS = 24
@@ -140,7 +140,7 @@ def get_process_stats(
                         "cpu_percent": cpu_percent,
                         "memory_bytes": memory_bytes,
                         "memory_mib": round(memory_bytes / (1024 * 1024), 1),
-                        "memory_mb": round(memory_bytes / (1024 * 1024), 1),
+                        "memory_mb": round(memory_bytes / 1_000_000, 1),
                     }
                 )
             except psutil.AccessDenied:
@@ -261,11 +261,14 @@ def get_service_status(service_name: str) -> ToolExecutionResult:
     try:
         service = psutil.win_service_get(service_name)
         details = service.as_dict()
+        dependencies, dependencies_available = _read_service_dependencies(service_name)
         data = {
             "service_name": service_name,
             "status": str(details.get("status") or "unknown"),
             "start_type": str(details.get("start_type") or "unknown"),
             "display_name": str(details.get("display_name") or "")[:160],
+            "dependencies": dependencies,
+            "dependencies_available": dependencies_available,
         }
         return _result("get_service_status", "success", "Read the requested Windows service status.", data=data)
     except psutil.NoSuchProcess:
@@ -274,6 +277,16 @@ def get_service_status(service_name: str) -> ToolExecutionResult:
         return _result("get_service_status", "permission_denied", "Access to the requested service was denied.", error=type(exc).__name__)
     except Exception as exc:
         return _result("get_service_status", "failed", "The requested service status could not be read.", error=type(exc).__name__)
+
+
+def _read_service_dependencies(service_name: str) -> tuple[list[str], bool]:
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, rf"SYSTEM\CurrentControlSet\Services\{service_name}") as key:
+            raw = winreg.QueryValueEx(key, "DependOnService")[0]
+            return ([str(item)[:128] for item in raw[:20]] if isinstance(raw, list) else []), True
+    except OSError:
+        return [], False
 
 
 def get_system_uptime() -> ToolExecutionResult:
@@ -328,6 +341,8 @@ def list_services(*, limit: int = 30) -> ToolExecutionResult:
 
 def _event_xpath(filters: dict[str, Any]) -> str:
     conditions = [f"TimeCreated[timediff(@SystemTime) <= {filters['hours_back'] * 3_600_000}]"]
+    if filters.get("provider_name"):
+        conditions.append(f"Provider[@Name='{filters['provider_name']}']")
     if filters["levels"]:
         levels = " or ".join(f"Level={value}" for value in filters["levels"])
         conditions.append(f"({levels})")
@@ -431,12 +446,15 @@ def _parse_event_xml(xml_text: str) -> dict[str, Any]:
 def _validate_event_filters(filters: dict[str, Any] | None) -> tuple[dict[str, Any] | None, str | None]:
     raw = {} if filters is None else filters
     if not isinstance(raw, dict) or set(raw) - _ALLOWED_EVENT_FILTERS:
-        return None, "filters must use only log_name, hours_back, event_ids, levels, and max_events."
+        return None, "filters contain an unsupported field."
     log_name = raw.get("log_name", "System")
     hours = raw.get("hours_back", 24)
     event_ids = raw.get("event_ids", [])
     levels = raw.get("levels", [1, 2, 3])
     max_events = raw.get("max_events", 20)
+    provider_name = raw.get("provider_name")
+    if provider_name is not None and (not isinstance(provider_name, str) or not re.fullmatch(r"[A-Za-z0-9_. -]{1,100}", provider_name)):
+        return None, "provider_name must be a simple Windows event provider name."
     if not isinstance(log_name, str) or log_name not in _ALLOWED_LOGS:
         return None, "log_name must be Application, System, or Setup."
     if not isinstance(hours, int) or isinstance(hours, bool) or not 1 <= hours <= 168:
@@ -457,6 +475,7 @@ def _validate_event_filters(filters: dict[str, Any] | None) -> tuple[dict[str, A
         "event_ids": list(dict.fromkeys(event_ids)),
         "levels": list(dict.fromkeys(levels)),
         "max_events": max_events,
+        "provider_name": provider_name,
     }, None
 
 

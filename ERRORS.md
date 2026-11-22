@@ -1,5 +1,32 @@
 # Errors and Environment Blockers
 
+## Expanded MCP Windows diagnostics — 2026-11-22
+
+- The first direct live smoke check returned `RuntimeError` for the fixed
+  device CIM query, `TimeoutExpired` for the fixed IP PowerShell query, and
+  `RuntimeError` for the DNS cmdlet. These failed commands were not retried.
+  A separate read-only PnPUtil problem-device probe succeeded with zero
+  records; a psutil/registry network probe returned six interfaces and
+  registry metadata for one. OSGuard now uses those faster native paths for
+  problem devices and network configuration. CIM-dependent driver metadata
+  and complete per-interface DNS metadata remain host limitations.
+- A sandboxed FAISS initialization attempt hit `WinError 10013` while the
+  cached embedding model checked Hugging Face; it was stopped. An approved
+  network-capable run succeeded but reused the old 536-chunk index because
+  source-list changes were not part of readiness validation. A source-allowlist
+  hash check was added, then one approved rebuild produced 679 chunks and a
+  verified FAISS search. No Windows security policy was changed.
+- Two documentation patch attempts failed context matching without modifying
+  files. Smaller matching patches succeeded. One service-test patch likewise
+  failed because the test function name differed; a corrected patch applied.
+- The one complete pytest run found **1 failure, 200 passes, 2 skips**. The
+  failure exposed an overbroad installed-software selection in the Phase 3
+  graph fixture for an unnamed Runtime dependency. That selected a real host
+  inventory during a mocked unit test. The selection was narrowed and the
+  failed graph test plus 13 related fixtures passed in a focused rerun.
+  The full suite was not rerun after the correction, honoring the requested
+  one-full-suite limit; an all-suite post-fix pass is not claimed.
+
 ## FAISS initialization and live integration check — 2026-11-22
 
 - The missing-index message came from a real missing `data/faiss/index.faiss`.

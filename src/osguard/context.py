@@ -33,6 +33,13 @@ from osguard.tools.windows import (
 )
 from osguard.tools.filesystem import get_largest_files, list_directory, get_directory_size
 from osguard.tools.registry import validate_arguments
+from osguard.tools.extended import (
+    inspect_problem_devices, inspect_device_status, inspect_device_drivers,
+    inspect_network_adapters, get_network_configuration, inspect_dns_configuration,
+    check_network_connectivity, get_windows_update_history, inspect_failed_updates,
+    inspect_update_service_status, inspect_installed_software,
+    inspect_application_process, inspect_application_errors,
+)
 
 
 WindowsTool = Callable[..., ToolExecutionResult]
@@ -46,6 +53,10 @@ _SERVICE_PATTERNS = (
 def _service_name(request: str) -> str | None:
     if re.search(r"\bwindows update\b", request, re.I):
         return "wuauserv"
+    if re.search(r"\bwindows search\b", request, re.I):
+        return "WSearch"
+    if re.search(r"\bprint spooler\b", request, re.I):
+        return "Spooler"
     for pattern in _SERVICE_PATTERNS:
         match = pattern.search(request)
         if match:
@@ -62,13 +73,26 @@ def _known_folder(request: str) -> str | None:
     return None
 
 
+def _application_name(state: OSGuardState) -> str | None:
+    environment = state.get("available_environment")
+    candidate = getattr(environment, "application_name", None)
+    if not candidate:
+        request = state.get("user_request", "")
+        match = re.search(r"\b(?:why is|is|does|did)\s+([A-Za-z0-9_.+ -]{2,60}?)\s+"
+                          r"(?:crash(?:ing|es|ed)?|fail(?:ing|s|ed)?|not (?:working|opening|starting))\b", request, re.I)
+        candidate = match.group(1).strip() if match else None
+    if candidate and re.fullmatch(r"[A-Za-z0-9_.+ -]{2,80}", candidate):
+        return candidate
+    return None
+
+
 def _local_fact_question(state: OSGuardState) -> bool:
     request = state.get("user_request", "")
     if re.search(r"\b(why|explain|documentation|guidance|troubleshoot|diagnos[ei])\b", request, re.I):
         return False
     return bool(re.search(
         r"\b(which|what|show|list|is|how much|how many)\b.*\b"
-        r"(file|folder|directory|downloads|documents|desktop|process|ram|memory|service|uptime|windows update)\b",
+        r"(file|folder|directory|downloads|documents|desktop|process|ram|memory|service|uptime|windows update|driver|device|network|adapter|dns|installed software)\b",
         request, re.I,
     ))
 
@@ -96,6 +120,42 @@ def select_read_only_tools(
     }:
         if explicit_demo_request_quote(state.get("user_request", "")):
             planned.append(("inspect_osguard_demo_cache", {}))
+        update_question = "windows update" in request or bool(re.search(r"\bupdate (?:fail|error|history|install)", request))
+        if OSSubsystem.DEVICES_DRIVERS in subsystems or re.search(r"\b(drivers?|devices?)\b", request):
+            if re.search(r"\b(version|provider|date|signed)\b", request):
+                planned.append(("inspect_device_drivers", {}))
+            elif re.search(r"\b(status|connected|disabled|hardware)\b", request):
+                planned.append(("inspect_device_status", {}))
+            else:
+                planned.append(("inspect_problem_devices", {}))
+        if OSSubsystem.NETWORKING in subsystems or re.search(r"\b(wi-?fi|ethernet|network|dns|internet)\b", request):
+            if re.search(r"\bdns\b", request):
+                planned.append(("inspect_dns_configuration", {}))
+                if not _local_fact_question(state):
+                    planned.append(("get_network_configuration", {}))
+            else:
+                planned.append(("inspect_network_adapters", {}))
+                if not re.search(r"\bonly\b", request):
+                    planned.append(("get_network_configuration", {}))
+            if re.search(r"\b(internet|online|connectivity|reach(?:able)?|connected to the network)\b", request):
+                planned.append(("check_network_connectivity", {}))
+            if re.search(r"\b(wi-?fi|ethernet)\b", request) and not _local_fact_question(state):
+                planned.append(("inspect_problem_devices", {"device_class": "Net", "limit": 20}))
+        if update_question:
+            planned.append(("inspect_failed_updates" if re.search(r"\b(fail|failed|error|unsuccessful)\b", request) else "get_windows_update_history", {}))
+            if not _local_fact_question(state):
+                planned.append(("inspect_update_service_status", {}))
+        application = _application_name(state)
+        if OSSubsystem.SOFTWARE_DEPENDENCIES in subsystems or re.search(r"\b(software|application|app|program)\b", request):
+            inventory_request = bool(re.search(
+                r"\b(what|which|list|show)\b.{0,35}\b(installed|software|applications|apps)\b",
+                request,
+            ))
+            if application or inventory_request:
+                planned.append(("inspect_installed_software", {"name": application} if application else {}))
+            if application and re.search(r"\b(crash|fail|not working|not opening|not starting)\b", request):
+                planned.append(("inspect_application_process", {"name": application}))
+                planned.append(("inspect_application_errors", {"name": application}))
         folder = _known_folder(request)
         if folder and (OSSubsystem.STORAGE_FILESYSTEM in subsystems or re.search(r"\b(files?|folders?|directory|size|largest)\b", request)):
             if re.search(r"\b(largest|biggest|top\s+\d+|most space)\b", request):
@@ -131,7 +191,7 @@ def select_read_only_tools(
             or any(token in request for token in ("disk space", "disk full", "storage", "file system"))
         ):
             planned.append(("get_disk_info", {}))
-        if OSSubsystem.SERVICES_STARTUP in subsystems or "service" in request or "windows update" in request:
+        if OSSubsystem.SERVICES_STARTUP in subsystems or "service" in request or "windows search" in request or "print spooler" in request:
             name = _service_name(state.get("user_request", ""))
             if name:
                 planned.append(("get_service_status", {"service_name": name}))
@@ -142,7 +202,7 @@ def select_read_only_tools(
         elif any(token in request for token in ("event log", "event viewer", "crash", "crashes", "crashing", "windows update", "after update", "error log")):
             planned.append(("get_event_logs", {"filters": {"log_name": "Application", "hours_back": 24, "max_events": 20}}))
         # Basic OS/build context helps diagnose update, driver, and dependency issues.
-        if OSSubsystem.DEVICES_DRIVERS in subsystems or OSSubsystem.SOFTWARE_DEPENDENCIES in subsystems:
+        if (OSSubsystem.DEVICES_DRIVERS in subsystems or OSSubsystem.SOFTWARE_DEPENDENCIES in subsystems) and len(planned) < 4:
             planned.append(("get_system_info", {}))
         if "uptime" in request or "last boot" in request:
             planned.append(("get_system_uptime", {}))
@@ -165,6 +225,10 @@ def select_follow_up_tools(
     if _local_fact_question(state):
         return []
     service = next((item for item in results if item.tool_name == "get_service_status"), None)
+    device = next((item for item in results if item.tool_name == "inspect_problem_devices" and item.status == "success"), None)
+    if device and device.data.get("devices") and not any(item.tool_name == "inspect_device_drivers" for item in results):
+        if re.search(r"\b(driver|drivers)\b", state.get("user_request", ""), re.I):
+            return [("inspect_device_drivers", {"limit": 20})]
     if (
         service is None or service.status != "success"
         or str(service.data.get("status", "")).casefold() in {"running", ""}
@@ -212,6 +276,19 @@ def create_evidence_collection_node(
         "get_directory_size": get_directory_size,
         "get_system_uptime": get_system_uptime,
         "list_services": list_services,
+        "inspect_problem_devices": inspect_problem_devices,
+        "inspect_device_status": inspect_device_status,
+        "inspect_device_drivers": inspect_device_drivers,
+        "inspect_network_adapters": inspect_network_adapters,
+        "get_network_configuration": get_network_configuration,
+        "inspect_dns_configuration": inspect_dns_configuration,
+        "check_network_connectivity": check_network_connectivity,
+        "get_windows_update_history": get_windows_update_history,
+        "inspect_failed_updates": inspect_failed_updates,
+        "inspect_update_service_status": inspect_update_service_status,
+        "inspect_installed_software": inspect_installed_software,
+        "inspect_application_process": inspect_application_process,
+        "inspect_application_errors": inspect_application_errors,
         "inspect_osguard_demo_cache": DemoCacheStore().tool_result,
     }
     if windows_tools:
@@ -336,9 +413,12 @@ def create_evidence_collection_node(
             update["uncertainty_notes"] = [
                 "No approved read-only diagnostic tool matched the requested measurement or authorized location."
             ]
-        if OSSubsystem.DEVICES_DRIVERS in classification.os_subsystems:
+        if OSSubsystem.DEVICES_DRIVERS in classification.os_subsystems and not any(
+            item.tool_name in {"inspect_problem_devices", "inspect_device_status", "inspect_device_drivers"}
+            and item.status == "success" for item in tool_results
+        ):
             update.setdefault("uncertainty_notes", []).append(
-                "Device and driver inventory is not available through an approved read-only tool."
+                "Device and driver inventory could not be read through an approved read-only tool."
             )
         if errors:
             update["errors"] = errors

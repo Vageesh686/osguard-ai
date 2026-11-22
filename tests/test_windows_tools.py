@@ -66,7 +66,7 @@ def test_process_snapshot_is_bounded_and_reports_cpu_memory(monkeypatch):
         "pid": 34,
         "name": "sample.exe",
         "cpu_percent": 18.5,
-        "memory_mb": 32.0,
+        "memory_mb": 33.6,
         "memory_mib": 32.0,
         "memory_bytes": 1024 * 1024 * 32,
     }
@@ -107,6 +107,7 @@ def test_memory_and_disk_information_are_structured(monkeypatch):
 
 def test_service_lookup_validates_name_and_handles_missing_or_denied(monkeypatch):
     _windows(monkeypatch)
+    monkeypatch.setattr(windows, "_read_service_dependencies", lambda _name: (["RpcSs"], True))
     monkeypatch.setattr(
         windows.psutil,
         "win_service_get",
@@ -118,6 +119,7 @@ def test_service_lookup_validates_name_and_handles_missing_or_denied(monkeypatch
     assert result.status == "success"
     assert result.data["status"] == "running"
     assert result.data["start_type"] == "automatic"
+    assert result.data["dependencies"] == ["RpcSs"]
     assert windows.get_service_status("*").status == "invalid_input"
     assert windows.get_service_status("Spooler;Stop-Service").status == "invalid_input"
 

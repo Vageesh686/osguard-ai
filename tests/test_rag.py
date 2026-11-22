@@ -359,11 +359,22 @@ def test_explicit_initialization_persists_and_reuses_verified_index(tmp_path, fa
     assert calls["embed_documents"] == 1
 
     retriever.clear_index_cache()
-    reloaded = knowledge_base.inspect_knowledge_base(index_dir=index_dir, embeddings=encoder)
+    reloaded = knowledge_base.inspect_knowledge_base(index_dir=index_dir, source_config=config, embeddings=encoder)
     assert reloaded.state == "faiss_ready"
     found = search_documentation("CPU process", index_dir=index_dir, embeddings=encoder)
     assert found.status == "success" and found.backend == "faiss"
     assert found.evidence[0].source_url == "https://learn.microsoft.com/test"
+    changed = json.loads(config.read_text(encoding="utf-8"))
+    changed[0]["title"] = "Updated CPU and process guidance"
+    config.write_text(json.dumps(changed), encoding="utf-8")
+    assert knowledge_base.inspect_knowledge_base(
+        index_dir=index_dir, source_config=config, embeddings=encoder
+    ).state == "index_incomplete"
+    rebuilt = knowledge_base.initialize_knowledge_base(
+        index_dir=index_dir, source_config=config, fetcher=fetch, embeddings=encoder
+    )
+    assert rebuilt.state == "faiss_ready" and rebuilt.retrieval_verified
+    assert calls["fetch"] == 2
 
 
 def test_incomplete_corrupt_and_incompatible_indexes_can_be_rebuilt(tmp_path, fake_faiss):
@@ -376,7 +387,7 @@ def test_incomplete_corrupt_and_incompatible_indexes_can_be_rebuilt(tmp_path, fa
     ).state == "faiss_ready"
 
     (index_dir / "index.sha256.json").unlink()
-    assert knowledge_base.inspect_knowledge_base(index_dir=index_dir, embeddings=encoder).state == "index_incomplete"
+    assert knowledge_base.inspect_knowledge_base(index_dir=index_dir, source_config=config, embeddings=encoder).state == "index_incomplete"
     incomplete = search_documentation("CPU", index_dir=index_dir, embeddings=encoder)
     assert incomplete.status == "index_missing" and "incomplete" in incomplete.message
     assert knowledge_base.initialize_knowledge_base(
@@ -392,7 +403,7 @@ def test_incomplete_corrupt_and_incompatible_indexes_can_be_rebuilt(tmp_path, fa
     receipt_payload["manifest_sha256"] = hashlib.sha256(manifest.read_bytes()).hexdigest()
     receipt.write_text(json.dumps(receipt_payload), encoding="utf-8")
     retriever.clear_index_cache(index_dir)
-    assert knowledge_base.inspect_knowledge_base(index_dir=index_dir, embeddings=encoder).state == "index_corrupt"
+    assert knowledge_base.inspect_knowledge_base(index_dir=index_dir, source_config=config, embeddings=encoder).state == "index_corrupt"
     assert knowledge_base.initialize_knowledge_base(
         index_dir=index_dir, source_config=config, fetcher=fetch, embeddings=encoder
     ).state == "faiss_ready"
@@ -401,7 +412,7 @@ def test_incomplete_corrupt_and_incompatible_indexes_can_be_rebuilt(tmp_path, fa
     payload["chunks"][0]["url"] = "https://untrusted.example.invalid/page"
     manifest.write_text(json.dumps(payload), encoding="utf-8")
     retriever.clear_index_cache(index_dir)
-    assert knowledge_base.inspect_knowledge_base(index_dir=index_dir, embeddings=encoder).state == "index_corrupt"
+    assert knowledge_base.inspect_knowledge_base(index_dir=index_dir, source_config=config, embeddings=encoder).state == "index_corrupt"
     assert search_documentation("CPU", index_dir=index_dir, embeddings=encoder).status == "index_corrupt"
     assert knowledge_base.initialize_knowledge_base(
         index_dir=index_dir, source_config=config, fetcher=fetch, embeddings=encoder
@@ -411,7 +422,7 @@ def test_incomplete_corrupt_and_incompatible_indexes_can_be_rebuilt(tmp_path, fa
         model_name = "another-local-model"
 
     assert knowledge_base.inspect_knowledge_base(
-        index_dir=index_dir, embeddings=OtherEncoder()
+        index_dir=index_dir, source_config=config, embeddings=OtherEncoder()
     ).state == "embedding_mismatch"
     assert knowledge_base.initialize_knowledge_base(
         index_dir=index_dir, source_config=config, fetcher=fetch, embeddings=OtherEncoder()

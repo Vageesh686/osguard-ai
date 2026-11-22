@@ -7,6 +7,31 @@ adds corrective-action proposals and the mandatory IEEE gate. Phase 5 adds
 exact demo-cache repair planning, checkpointed approval, restricted execution,
 and post-repair validation.
 
+## Extended MCP diagnostic boundary (2026-11-22)
+
+The existing Supervisor, collector, specialists, IEEE, and approval graph now
+selects bounded read-only device, network, Windows Update, and software
+inventories alongside its earlier tools. Selection uses classified subsystem,
+request intent, advertised MCP capability names and descriptions, independent
+argument schemas, and one evidence-driven follow-up. The MCP client permits
+four initial calls and one distinct follow-up. Successful results retain tool
+evidence IDs and backend labels.
+
+New registry entries include `inspect_problem_devices`,
+`inspect_device_status`, `inspect_device_drivers`,
+`inspect_network_adapters`, `get_network_configuration`,
+`inspect_dns_configuration`, `check_network_connectivity`,
+`get_windows_update_history`, `inspect_failed_updates`,
+`inspect_update_service_status`, `inspect_installed_software`,
+`inspect_application_process`, and `inspect_application_errors`.
+Device and Update inventory use fixed system PowerShell queries; PnPUtil is
+a read-only device fallback. Network address and DNS metadata use psutil and
+read-only registry data. Software inventory reads uninstall keys, never
+`Win32_Product`. External connectivity is limited to one approved Microsoft
+endpoint and a three-second maximum timeout. Tool outputs do not authorize
+any action; IEEE verification and exact user approval still govern the sole
+demo-cache repair. Private IPv4 literals are redacted from Groq prompts.
+
 ## Workflow
 
 ```mermaid
@@ -80,8 +105,8 @@ Approved known-folder tools resolve Downloads, Documents and Desktop with the
 Windows Known Folder API. They inspect file metadata only, reject arbitrary
 paths and reparse points, and cap depth, entry count and elapsed scan time.
 Incomplete scans are labeled partial. The registry also includes bounded
-uptime and service-list reads. No device or driver enumeration was added;
-that capability remains unavailable until a safe API contract is verified.
+uptime and service-list reads. Device and driver inventories use the same
+approved registry and preserve the result's evidence provenance.
 
 ## Shared state and evidence provenance
 

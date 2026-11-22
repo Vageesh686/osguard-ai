@@ -77,6 +77,34 @@
     "category": "devices_drivers"
   },
   {
+    "source_id": "windows-wireless-connectivity",
+    "title": "Advanced troubleshooting wireless network connectivity",
+    "url": "https://learn.microsoft.com/en-us/troubleshoot/windows-client/networking/wireless-network-connectivity-issues-troubleshooting",
+    "os_version": "Windows 11",
+    "category": "networking"
+  },
+  {
+    "source_id": "windows-dns-client-resolution",
+    "title": "Troubleshoot DNS client name resolution issues",
+    "url": "https://learn.microsoft.com/en-us/troubleshoot/windows-client/networking/troubleshoot-dns-client-resolution-issues",
+    "os_version": "Windows 11",
+    "category": "networking"
+  },
+  {
+    "source_id": "windows-update-errors",
+    "title": "Common Windows Update errors",
+    "url": "https://learn.microsoft.com/en-us/troubleshoot/windows-client/installing-updates-features-roles/common-windows-update-errors",
+    "os_version": "Windows 11",
+    "category": "system_configuration"
+  },
+  {
+    "source_id": "windows-application-crashes",
+    "title": "Troubleshoot application or service crashing behavior",
+    "url": "https://learn.microsoft.com/en-us/troubleshoot/windows-server/performance/troubleshoot-application-service-crashing-behavior",
+    "os_version": "Windows 11 (Windows Client applicability noted by source)",
+    "category": "software_dependencies"
+  },
+  {
     "source_id": "dotnet-windows-install",
     "title": "Install .NET on Windows",
     "url": "https://learn.microsoft.com/en-us/dotnet/core/install/windows",

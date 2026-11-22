@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+import hashlib
+import json
 from pathlib import Path
 from threading import RLock
 from typing import Any, Literal
@@ -100,6 +102,14 @@ def inspect_knowledge_base(
             return KnowledgeBaseStatus(
                 "embedding_mismatch", "unavailable",
                 "The index uses a different embedding model; initialize documentation to rebuild it.",
+                location,
+            )
+        manifest = json.loads((path / "manifest.json").read_text(encoding="utf-8"))
+        current_source_hash = hashlib.sha256(Path(source_config).read_bytes()).hexdigest()
+        if manifest.get("source_config_sha256") != current_source_hash:
+            return KnowledgeBaseStatus(
+                "index_incomplete", "unavailable",
+                "The documentation source allowlist changed; initialize documentation to rebuild the index.",
                 location,
             )
     except (ValueError, OSError, TypeError) as exc:

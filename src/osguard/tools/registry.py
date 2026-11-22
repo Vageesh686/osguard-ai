@@ -31,6 +31,7 @@ class EventFilters(ToolArgs):
     event_ids: list[int] = Field(default_factory=list, max_length=20)
     levels: list[int] = Field(default_factory=lambda: [1, 2, 3], max_length=5)
     max_events: int = Field(default=20, ge=1, le=100)
+    provider_name: str | None = Field(default=None, min_length=1, max_length=100, pattern=r"^[A-Za-z0-9_. -]+$")
 
     @field_validator("event_ids")
     @classmethod
@@ -79,6 +80,46 @@ class ServicesArgs(ToolArgs):
     limit: int = Field(default=30, ge=1, le=50)
 
 
+class DeviceArgs(ToolArgs):
+    device_class: str | None = Field(default=None, min_length=1, max_length=80, pattern=r"^[A-Za-z0-9_. -]+$")
+    status: Literal["healthy", "reported_problem", "disabled", "disconnected", "missing_driver", "unknown"] | None = None
+    device_id: str | None = Field(default=None, min_length=3, max_length=120, pattern=r"^[A-Za-z0-9_&\\#.+{}-]+$")
+    problem_only: bool = True
+    limit: int = Field(default=20, ge=1, le=50)
+
+
+class DeviceStatusArgs(DeviceArgs):
+    problem_only: bool = False
+
+
+class DriverArgs(ToolArgs):
+    device_class: str | None = Field(default=None, min_length=1, max_length=80, pattern=r"^[A-Za-z0-9_. -]+$")
+    device_id: str | None = Field(default=None, min_length=3, max_length=120, pattern=r"^[A-Za-z0-9_&\\#.+{}-]+$")
+    limit: int = Field(default=20, ge=1, le=50)
+
+
+class LimitArgs(ToolArgs):
+    limit: int = Field(default=20, ge=1, le=50)
+
+
+class SoftwareArgs(LimitArgs):
+    name: str | None = Field(default=None, min_length=2, max_length=80, pattern=r"^[A-Za-z0-9_.+ -]+$")
+
+
+class AppProcessArgs(LimitArgs):
+    name: str = Field(min_length=2, max_length=80, pattern=r"^[A-Za-z0-9_.+ -]+$")
+
+
+class AppErrorsArgs(LimitArgs):
+    name: str | None = Field(default=None, min_length=2, max_length=80, pattern=r"^[A-Za-z0-9_.+ -]+$")
+    hours_back: int = Field(default=48, ge=1, le=168)
+
+
+class ConnectivityArgs(ToolArgs):
+    target: Literal["microsoft"] = "microsoft"
+    timeout_seconds: float = Field(default=2.0, ge=0.2, le=3.0)
+
+
 APPROVED_ARGUMENTS: dict[str, type[ToolArgs]] = {
     "get_system_info": NoArgs,
     "get_process_stats": ProcessArgs,
@@ -91,6 +132,19 @@ APPROVED_ARGUMENTS: dict[str, type[ToolArgs]] = {
     "get_directory_size": SizeFolderArgs,
     "get_system_uptime": NoArgs,
     "list_services": ServicesArgs,
+    "inspect_problem_devices": DeviceArgs,
+    "inspect_device_status": DeviceStatusArgs,
+    "inspect_device_drivers": DriverArgs,
+    "inspect_network_adapters": LimitArgs,
+    "get_network_configuration": LimitArgs,
+    "inspect_dns_configuration": LimitArgs,
+    "check_network_connectivity": ConnectivityArgs,
+    "get_windows_update_history": LimitArgs,
+    "inspect_failed_updates": LimitArgs,
+    "inspect_update_service_status": NoArgs,
+    "inspect_installed_software": SoftwareArgs,
+    "inspect_application_process": AppProcessArgs,
+    "inspect_application_errors": AppErrorsArgs,
 }
 
 

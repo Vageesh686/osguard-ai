@@ -1,5 +1,95 @@
 # OSGuard AI Progress
 
+## Expanded Windows diagnostics through local MCP — 2026-11-22
+
+**Status:** The existing LangGraph collector and local MCP server now expose
+bounded read-only device/driver, network, Windows Update, and software
+diagnostics. Driver-problem questions select `inspect_problem_devices` instead
+of relying only on Windows version information. The graph, Groq provider,
+FAISS retrieval, IEEE gate, approval workflow, and sole demo-cache repair
+remain in place. No Windows configuration or security policy was changed.
+
+### Implemented
+
+- Added 13 approved MCP tools: `inspect_problem_devices`,
+  `inspect_device_status`, `inspect_device_drivers`,
+  `inspect_network_adapters`, `get_network_configuration`,
+  `inspect_dns_configuration`, `check_network_connectivity`,
+  `get_windows_update_history`, `inspect_failed_updates`,
+  `inspect_update_service_status`, `inspect_installed_software`,
+  `inspect_application_process`, and `inspect_application_errors`.
+- Device problem inventory uses documented read-only PnPUtil first, with a
+  fixed CIM fallback. Other device/driver inventory uses fixed CIM reads.
+  Problem codes distinguish reported problems, disabled, disconnected, and
+  missing-driver states. A nonzero code is not treated as proof of driver
+  malfunction. Native network address/DNS inventory uses psutil and read-only
+  TCP/IP registry metadata; missing gateway/DNS metadata remains unknown.
+- Windows Update history uses a fixed local COM read; software inventory reads
+  uninstall registry names, versions, and publishers without `Win32_Product`.
+  Matching application processes and bounded crash events add local evidence.
+  Event filters now accept a validated provider name; service status includes
+  registry dependencies when accessible. Process `memory_mb` now uses decimal
+  MB; `memory_mib` remains binary MiB.
+- The collector selects at most four initial approved capabilities and one
+  distinct evidence-driven follow-up. Client and server schemas validate
+  arguments; the MCP client rejects unknown names, duplicate calls, malformed
+  results, and calls without matching success evidence IDs. Generic dependency
+  text no longer triggers broad host software inventory in unit tests.
+- Diagnostic prompt rules distinguish observed codes, network probe outcomes,
+  unrelated events, and uncertainty. Successful new tool rows can become
+  evidence-ID-backed observations. Streamlit displays relevant inventory
+  tables and raw per-tool status. Private IPv4 and IPv6 values are redacted before
+  shared evidence reaches Groq.
+- Added four verified Microsoft Learn sources for Wi-Fi, DNS, Update errors,
+  and application crashes. A source-allowlist hash now detects a stale FAISS
+  index before initialization. The approved rebuild produced **679 chunks**
+  and verified a real FAISS lookup; no source fetch errors were reported.
+
+### Verification and limitations
+
+- Focused runs: **42 passed** for MCP/Windows/UI checks before the final
+  selection correction; **33 passed** for extended diagnostics, RAG, and
+  privacy; **14 passed** for the previously failing graph test and extended
+  fixtures after the correction; **22 passed** for the final extended-diagnostic
+  and privacy regression run. Tests use mocked Windows APIs and MCP
+  fixtures; they make no Groq call and perform no repair.
+- The one complete pytest run reported **200 passed, 1 failed, 2 skipped,
+  17 warnings** in 62.15 seconds. The failed Phase 3 graph test found an
+  overbroad software-inventory selection for unnamed dependency text. That
+  selection was narrowed, and the exact failed test passed in the 14-test
+  focused rerun. Per the request to run the complete suite only once, the
+  complete suite was not rerun after the fix; a post-fix all-suite green
+  result is therefore **not claimed**. The two skips require Windows symlink
+  privilege; warnings come from LangSmith's Python 3.14 deprecation usage.
+- Direct live smoke: network adapter inventory succeeded with six adapters,
+  Update history returned two failed/aborted entries, and installed-software
+  inventory succeeded with 20 displayed records. The initial CIM device query
+  failed, the PowerShell IP query timed out, and the DNS cmdlet failed; those
+  commands were not retried. Separate read-only PnPUtil and native-network
+  fallback probes succeeded: zero reported problem devices and six network
+  interfaces, with registry metadata for one interface.
+- A single approved live Groq + local MCP + native FAISS driver question
+  completed: `inspect_problem_devices` and `get_system_info` both returned
+  successful MCP results with evidence IDs, FAISS returned four Microsoft
+  passages, the Diagnostic Agent completed, there were no graph error codes,
+  and no repair executed. The Supervisor's general `software_failure` problem
+  label is less specific than a driver issue, although routing selected the
+  device tool. No live driver-version, external connectivity, browser UI,
+  or Windows repair demonstration was performed.
+
+### Files and next work
+
+Added `src/osguard/tools/extended.py`, `tests/test_extended_diagnostics.py`,
+`scripts/smoke_extended.py`, and `scripts/check_mcp_drivers.py`. Modified
+`src/osguard/tools/registry.py`, `src/osguard/tools/windows.py`,
+`src/osguard/mcp/server.py`, `src/osguard/context.py`,
+`src/osguard/agents/diagnostic.py`, `src/osguard/privacy.py`,
+`src/osguard/rag/ingest.py`, `src/osguard/rag/knowledge_base.py`, `app.py`,
+`data/documentation_sources.json`, `tests/test_windows_tools.py`,
+`tests/test_rag.py`, README and architecture/guide/error documents.
+Next work is manual browser review and targeted host checks for CIM-dependent
+driver details and per-interface DNS metadata; no repair expansion is planned.
+
 ## FAISS initialization and MCP integration — 2026-11-22
 
 **Status:** Native FAISS 1.16.0 imports on the current Python 3.14 Windows

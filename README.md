@@ -1,6 +1,27 @@
 
 # OSGuard AI
 
+## Expanded read-only Windows diagnostics
+
+The existing local MCP server now offers device problem/status and driver
+inventory, network adapter/IP/DNS inspection, local Windows Update history,
+installed software names and versions, matching application processes and
+crash events. It retains process, memory, disk, service, event-log, uptime,
+and approved known-folder checks. The Supervisor's subsystem and request
+select at most four initial approved tools and one distinct follow-up; MCP
+schema and local Pydantic validation both apply. Tool status and evidence IDs
+remain visible in Streamlit, with tables for relevant inventories.
+
+Device inspection uses fixed read-only CIM queries with a PnPUtil fallback.
+Network addresses use psutil and read-only TCP/IP registry metadata. Windows
+Update history is a local read-only query. Software inventory reads uninstall
+keys; it never uses `Win32_Product`. A connectivity probe runs only for an
+explicit connectivity question, once, against the approved Microsoft host.
+No new repair permission, arbitrary command, driver update, service restart,
+registry write, or network configuration change was added. Failed or partial
+inventories remain uncertain; a device problem code is not automatically a
+driver fault. See `docs/PROGRESS.md` for exact live and test results.
+
 ## Local MCP diagnostics (current development branch)
 
 OSGuard's existing LangGraph evidence collector now prefers a local MCP stdio
@@ -9,8 +30,8 @@ project's Python 3.14 interpreter, discovers its approved tools and schemas,
 validates arguments again locally, makes a bounded set of calls, and closes
 the session. There is no public listener or MCP repair tool.
 
-The server wraps the existing Windows system, process, memory, disk, service,
-and event-log checks. It also exposes read-only known-folder metadata scans:
+The server wraps the approved Windows checks listed above. It also exposes
+read-only known-folder metadata scans:
 `get_largest_files`, `list_directory`, and `get_directory_size` for Downloads,
 Documents, and Desktop. `get_system_uptime` and `list_services` provide bounded
 additional checks. File contents are never opened. Arbitrary paths, junctions,
@@ -358,7 +379,7 @@ Index construction fetches only the Microsoft URLs listed in
 embeddings. The first build needs network access to those sources and may
 download the embedding model. Later requests reuse the persisted `data/faiss/`
 index instead of rebuilding it. The generated index is local and gitignored.
-The current development machine successfully initialized 536 chunks and
+The current development machine successfully initialized 679 chunks and
 verified native FAISS retrieval. The CLI exits successfully only after a
 validated FAISS load and a search. If the native library is blocked by the
 documented Application Control policy on another machine, the app can use its
@@ -428,8 +449,9 @@ User:
 Current behavior:
 1. Supervisor selects Compatibility Agent.
 2. The agent distinguishes facts stated by the user from hypotheses and asks
-   for missing versions or documented requirements. It does not inspect
-   installed software or invent versions.
+   for missing versions or documented requirements. Named or explicitly
+   requested installed software can be read from uninstall registry metadata;
+   absent version requirements are never invented.
 
 ### Scenario 4: Application crashes after a Windows update
 

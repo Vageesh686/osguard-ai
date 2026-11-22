@@ -21,6 +21,8 @@ _LABELED_IP = re.compile(
     r"(?i)(\b(?:ip(?:v4)?(?:\s+address)?|remote address|local address)\s*[:=]\s*)"
     r"((?:\d{1,3}\.){3}\d{1,3})\b"
 )
+_IPV4_LITERAL = re.compile(r"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])")
+_IPV6_CANDIDATE = re.compile(r"(?<![A-Fa-f0-9:])[A-Fa-f0-9:]{3,}(?![A-Fa-f0-9:])")
 _SID = re.compile(r"\bS-1-(?:\d+-){1,14}\d+\b", re.IGNORECASE)
 _IDENTITY_FIELD = re.compile(
     r"(?im)(\b(?:user(?:name)?|account name|computer name|machine name|domain user)\s*[:=]\s*)"
@@ -58,6 +60,24 @@ def _redact_posix_paths_outside_urls(text: str) -> str:
     return _POSIX_PATH.sub(replace, text)
 
 
+def _redact_ipv4(match: re.Match[str]) -> str:
+    try:
+        return "<PRIVATE_IP>" if not ip_address(match.group(0)).is_global else match.group(0)
+    except ValueError:
+        return match.group(0)
+
+
+def _redact_ipv6(match: re.Match[str]) -> str:
+    value = match.group(0)
+    if value.count(":") < 2:
+        return value
+    try:
+        parsed = ip_address(value)
+        return "<PRIVATE_IP>" if parsed.version == 6 and not parsed.is_global else value
+    except ValueError:
+        return value
+
+
 def redact_sensitive_text(text: str) -> str:
     """Mask common identifiers and filesystem paths before a Groq prompt.
 
@@ -77,5 +97,7 @@ def redact_sensitive_text(text: str) -> str:
     redacted = _IDENTITY_FIELD.sub(r"\1<REDACTED>", redacted)
     redacted = _EMAIL.sub("<EMAIL>", redacted)
     redacted = _LABELED_IP.sub(r"\1<IP_ADDRESS>", redacted)
+    redacted = _IPV4_LITERAL.sub(_redact_ipv4, redacted)
+    redacted = _IPV6_CANDIDATE.sub(_redact_ipv6, redacted)
     redacted = _SID.sub("<SID>", redacted)
     return redacted

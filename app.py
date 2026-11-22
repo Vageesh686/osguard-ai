@@ -125,6 +125,29 @@ def _render_supervisor_result(result):
 
     tool_results = result.get("tool_results", [])
     if tool_results:
+        for name, heading, data_key in (
+            ("inspect_problem_devices", "Problem devices", "devices"),
+            ("inspect_device_status", "Device status", "devices"),
+            ("inspect_device_drivers", "Driver versions", "drivers"),
+            ("inspect_network_adapters", "Network adapters", "adapters"),
+            ("get_network_configuration", "IP configuration", "interfaces"),
+            ("inspect_dns_configuration", "DNS configuration", "interfaces"),
+            ("get_windows_update_history", "Windows Update history", "updates"),
+            ("inspect_failed_updates", "Failed updates", "updates"),
+            ("inspect_installed_software", "Installed software", "applications"),
+            ("inspect_application_process", "Application processes", "processes"),
+            ("inspect_application_errors", "Application errors", "events"),
+        ):
+            table_result = next((item for item in tool_results if item.tool_name == name and item.status == "success"), None)
+            if table_result is None:
+                continue
+            rows = table_result.data.get(data_key, [])
+            if rows:
+                st.markdown(f"**{heading}**")
+                st.dataframe(rows, hide_index=True, use_container_width=True)
+                st.caption(f"Measured by {name} · evidence ID: {table_result.evidence_id}")
+            if table_result.data.get("scan_cap_reached") or table_result.data.get("display_truncated") or table_result.data.get("entries_skipped"):
+                st.warning(f"{heading} inventory is partial or display-limited.")
         for name, heading in (
             ("get_largest_files", "Largest files"),
             ("list_directory", "Directory contents"),
