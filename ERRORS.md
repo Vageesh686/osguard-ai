@@ -1,5 +1,25 @@
 # Errors and Environment Blockers
 
+## Streamlit frontend work — 2026-11-24
+
+- An initial combined patch to replace `app.py` failed because multiple
+  operations targeted the same file; it did not change the file. The entrypoint
+  was replaced with a single subsequent edit.
+- An initial documentation patch missed its context because of line encoding;
+  the corrected header-anchored patch applied.
+- The initial focused UI run found a knowledge-base readiness condition that
+  initialized an already verified index. The condition was corrected. A UI
+  fixture also omitted widget keyword arguments from its visible text check;
+  that fixture was corrected. The focused UI/Phase 5 run then reported
+  **48 passed, 1 skipped**.
+- A first Streamlit `AppTest` used a button label as a key and failed to find
+  the button. The test was corrected; the focused AppTest runs passed **3**
+  checks. These were test-harness errors, not backend failures.
+- No unresolved frontend exception appeared in the focused checks or local
+  Streamlit startup. A live browser presentation and live Groq/RAM workflow
+  were not exercised. The final small display-only edit was not retested,
+  following the request to reduce testing.
+
 ## Expanded MCP Windows diagnostics — 2026-11-22
 
 - The first direct live smoke check returned `RuntimeError` for the fixed

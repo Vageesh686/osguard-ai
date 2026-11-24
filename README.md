@@ -1,6 +1,24 @@
 
 # OSGuard AI
 
+## Streamlit interface
+
+Run `.\.venv\Scripts\python.exe -m streamlit run app.py --server.address 127.0.0.1`.
+The dark dashboard has Home, Troubleshoot, Results, Knowledge Base, and Settings
+pages. Enter an issue on Home or Troubleshoot. The saved Results page presents
+the main finding, actual system measurements, observations, possible
+explanations, next steps, contributing components, and grouped Microsoft
+sources. Navigation does not rerun the diagnostic graph. Internal tool names,
+evidence IDs, raw commands, and graph objects are omitted from the main UI.
+
+On startup, the frontend checks documentation readiness once per session. It
+reuses a valid index, initializes a missing or stale one through the existing
+backend, and shows a retry control after failure. The only change offered in
+Settings is **OSGuard Workspace Cleanup**: it affects one known OSGuard-owned
+temporary entry, requires the existing safety checks and exact approval, and
+is confirmed by post-action inspection. The interface does not perform a
+Windows repair.
+
 ## Expanded read-only Windows diagnostics
 
 The existing local MCP server now offers device problem/status and driver
@@ -9,8 +27,9 @@ installed software names and versions, matching application processes and
 crash events. It retains process, memory, disk, service, event-log, uptime,
 and approved known-folder checks. The Supervisor's subsystem and request
 select at most four initial approved tools and one distinct follow-up; MCP
-schema and local Pydantic validation both apply. Tool status and evidence IDs
-remain visible in Streamlit, with tables for relevant inventories.
+schema and local Pydantic validation both apply. Streamlit shows relevant
+inventory tables and whether system analysis completed; internal tool
+identifiers and evidence IDs remain in the backend state.
 
 Device inspection uses fixed read-only CIM queries with a PnPUtil fallback.
 Network addresses use psutil and read-only TCP/IP registry metadata. Windows
@@ -44,8 +63,8 @@ server for protocol clients with
 `.\.venv\Scripts\python.exe -m osguard.mcp.server`. That command reserves
 stdout for MCP; it waits for a stdio client. Normal use is through
 `.\.venv\Scripts\python.exe -m streamlit run app.py --server.address 127.0.0.1`.
-The UI reports **MCP active**, **Direct fallback active**, or **Diagnostic tools
-unavailable**, plus provenance for each tool result.
+The UI reports whether read-only system analysis contributed to the result.
+Transport details and provenance remain in the structured backend state.
 
 Set `OSGUARD_DIAGNOSTIC_BACKEND=direct` to use the controlled Python tools
 without MCP. Set `OSGUARD_DIRECT_FALLBACK=0` to leave diagnostics unavailable
@@ -193,12 +212,10 @@ process reuse the in-memory index. No embedding service is called. The UI shows
 whether FAISS, the in-memory fallback, or neither backend served the request.
 Failed retrieval returns no citations.
 
-Open **Documentation knowledge base** in Streamlit and select **Initialize
-documentation** to download the allowlisted pages, embed chunks, persist the
-FAISS index under `data/faiss/`, reload and validate it, and verify one search.
-The UI distinguishes a missing or incomplete index, a validated FAISS index,
-a verified FAISS lookup, an active in-memory fallback, and initialization
-failure. Repeating initialization reuses a valid index. The command-line
+The Streamlit frontend checks and prepares documentation once per session on
+startup. A valid index is reused; a missing or stale index is initialized and
+verified through the existing backend. The Knowledge Base page reports
+readiness and offers an explicit retry after failure. The command-line
 equivalent is `python -m osguard.rag.build_index` in the project environment.
 
 Generate explanations that distinguish supporting evidence
@@ -365,10 +382,10 @@ The main Streamlit screen accepts a Windows issue, asks Groq for structured
 classification and selected specialist analyses, and displays read-only
 measurements and retrieved documentation where available. The exact request
 `Clear the OSGuard demo cache.` uses a fixed local route without a Groq call.
-After explicit fixture preparation and exact-plan approval, it can clear only
-that disposable cache. Submitted commands are never executed. Configure `.env`
-and build the local documentation index once, either with the Streamlit
-**Initialize documentation** button or this command:
+After explicit workspace preparation and exact-plan approval, it can clear only
+that disposable cache. Submitted commands are never executed. Configure `.env`;
+the UI prepares the local documentation index automatically when needed. You
+can also use this command:
 
 ```powershell
 .\.venv\Scripts\python.exe -m osguard.rag.build_index
@@ -466,11 +483,11 @@ User:
 "Clear the OSGuard demo cache."
 
 Current workflow:
-1. In Streamlit, select **Prepare disposable demo cache** to create known
-   application-owned fixture data.
-2. Submit the exact request above. The read-only inspection supplies evidence.
+1. In Settings, select **Prepare workspace files** to create known
+   application-owned temporary data.
+2. Select **Review workspace cleanup**. The read-only inspection supplies evidence.
 3. IEEE verification and eligibility checks produce an exact plan preview.
-4. **APPROVE** or **DECLINE** the plan. Approval resumes the same LangGraph
+4. **Approve** or **Decline** the plan. Approval resumes the same LangGraph
    thread and rechecks its fingerprint and current preconditions.
 5. The restricted handler clears the known payload once; fresh inspection
    determines the reported outcome.
@@ -591,19 +608,16 @@ In Streamlit, try these requests separately:
 3. `My app reports a missing .NET Desktop Runtime. I have version 7.0
    installed. Which version does it require?` Without indexed documentation,
    the requirement must remain unknown and no installation should run.
-4. Select **Prepare disposable demo cache**, then submit
-   `Clear the OSGuard demo cache.` Review the IEEE checks and exact plan. First
-   choose **DECLINE** and confirm no execution is reported. Submit the same
-   request again, choose **APPROVE**, and confirm post-repair inspection reports
+4. In Settings, select **Prepare workspace files** and **Review workspace
+   cleanup**. First choose **Decline** and confirm no execution is reported.
+   Review the cleanup again, choose **Approve**, and confirm post-repair inspection reports
    the actual result. Refresh the page to confirm it does not submit again.
 
-In Streamlit, open **Documentation knowledge base**. With no index it should
-show **Not initialized** while FAISS is available. Select **Initialize
-documentation** and wait for **FAISS ready** after a verified search. A later
-analysis should report **FAISS retrieval successful** and show linked evidence.
-If Smart App Control blocks `faiss.dll` on another device, the UI should show
-**In-memory fallback active** only after its own retrieval succeeds. If neither
-backend can retrieve, it should show an explicit error and no citations.
+Open **Knowledge Base**. With no index, startup should prepare documentation
+once and show readiness only after a verified lookup. If initialization fails,
+the page should report unavailability and offer **Retry documentation
+preparation**. A later analysis should show only sources actually retrieved.
+If neither backend can retrieve, no citations should appear.
 
 ## 14. Project Documentation
 

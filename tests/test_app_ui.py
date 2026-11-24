@@ -1,479 +1,343 @@
-"""UI rendering checks with a local Streamlit test double."""
+﻿"""Focused presentation checks using saved graph results and safe backend fixtures."""
 
-import runpy
-import sys
-from pathlib import Path
-from types import ModuleType
+from __future__ import annotations
 
+from contextlib import nullcontext
+from types import SimpleNamespace
+
+import pytest
+
+from osguard import frontend
+from osguard.rag import knowledge_base
 from osguard.schemas import (
-    IEEEVerificationResult,
-    IEEEVerificationSummary,
-    ApprovalState,
-    DemoCacheSnapshot,
-    ExecutionValidationResult,
-    PostRepairValidationResult,
-    RepairEligibility,
-    RepairPlan,
-    ProposedCorrectiveAction,
-    VerificationCheck,
-    FinalResponse,
-    ProblemType,
-    RequestIntent,
-    SpecialistName,
-    SpecialistResult,
-    SupervisorClassification,
-    RetrievedEvidence,
-    RetrievalResult,
-    SystemEnvironment,
-    ToolExecutionResult,
-    OSSubsystem,
+    ApprovalState, CommandVerificationFinding, DemoCacheSnapshot, DiagnosticObservation, ExecutionValidationResult,
+    FinalResponse, IEEEVerificationSummary, PostRepairValidationResult, ProblemType,
+    RepairEligibility, RepairPlan, RetrievalResult, RetrievedEvidence, SpecialistName,
+    SpecialistResult, SupervisorClassification, RequestIntent, ToolExecutionResult,
 )
 
 
-class _Expander:
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *_exc_info):
-        return False
-
-
-class _FakeStreamlit(ModuleType):
+class FakeStreamlit:
     def __init__(self):
-        super().__init__("streamlit")
         self.calls = []
         self.session_state = {}
         self.button_returns = {}
+        self.input_value = None
+        self.sidebar = nullcontext()
 
-    def cache_resource(self, **_kwargs):
+    def record(self, name, *args, **kwargs):
+        self.calls.append((name, args, kwargs))
+
+    def cache_resource(self, **kwargs):
         return lambda function: function
 
+    def columns(self, count):
+        self.record("columns", count)
+        return [nullcontext() for _ in range(count)]
+
+    def container(self, **kwargs):
+        self.record("container", **kwargs)
+        return nullcontext()
+
     def expander(self, *args, **kwargs):
-        self.calls.append(("expander", args, kwargs))
-        return _Expander()
+        self.record("expander", *args, **kwargs)
+        return nullcontext()
 
     def spinner(self, *args, **kwargs):
-        self.calls.append(("spinner", args, kwargs))
-        return _Expander()
+        self.record("spinner", *args, **kwargs)
+        return nullcontext()
 
-    def text_area(self, *_args, **_kwargs):
-        return ""
+    def radio(self, label, options, **kwargs):
+        self.record("radio", label, options, **kwargs)
+        return self.session_state.get(kwargs["key"], options[0])
+
+    def text_area(self, label, **kwargs):
+        self.record("text_area", label, **kwargs)
+        value = self.input_value if self.input_value is not None else self.session_state.get(
+            kwargs["key"], kwargs.get("value", "")
+        )
+        self.session_state[kwargs["key"]] = value
+        return value
 
     def button(self, label, **kwargs):
-        self.calls.append(("button", (label,), kwargs))
+        self.record("button", label, **kwargs)
         return self.button_returns.pop(label, False)
 
     def __getattr__(self, name):
-        def record(*args, **kwargs):
-            self.calls.append((name, args, kwargs))
+        return lambda *args, **kwargs: self.record(name, *args, **kwargs)
 
-        return record
-
-
-def _load_app_with_fake_streamlit(monkeypatch, *, button_returns=None, kb_status=None, kb_initializer=None):
-    from osguard.rag import knowledge_base
-
-    if kb_status is None:
-        kb_status = knowledge_base.KnowledgeBaseStatus(
-            "index_missing", "unavailable", "FAISS available. Documentation index not built.",
-            "fixture-index",
-        )
-    monkeypatch.setattr(knowledge_base, "inspect_knowledge_base", lambda: kb_status)
-    if kb_initializer is not None:
-        monkeypatch.setattr(knowledge_base, "initialize_knowledge_base", kb_initializer)
-    fake_streamlit = _FakeStreamlit()
-    fake_streamlit.button_returns.update(button_returns or {})
-    monkeypatch.setitem(sys.modules, "streamlit", fake_streamlit)
-    namespace = runpy.run_path(str(Path(__file__).parents[1] / "app.py"))
-    return namespace["_render_supervisor_result"], fake_streamlit
+    def visible(self):
+        return "\n".join(f"{args} {kwargs}" for name, args, kwargs in self.calls
+                         if name not in {"set_page_config", "columns"})
 
 
-def test_initialize_documentation_builds_and_verifies_without_groq(monkeypatch):
-    from osguard.rag.knowledge_base import KnowledgeBaseStatus
+@pytest.fixture
+def ui(monkeypatch):
+    fake = FakeStreamlit()
+    monkeypatch.setattr(frontend, "st", fake)
+    return fake
 
-    calls = []
-    def initialize():
-        calls.append("initialize")
-        return KnowledgeBaseStatus(
-            "faiss_ready", "faiss", "FAISS documentation index ready; retrieval verified.",
-            "fixture-index", document_count=2, retrieval_verified=True,
-        )
-    _, fake_st = _load_app_with_fake_streamlit(
-        monkeypatch, button_returns={"Initialize documentation": True},
-        kb_initializer=initialize,
-    )
-    assert calls == ["initialize"]
-    assert fake_st.session_state["osguard_kb_initialization"].backend == "faiss"
-    assert any(
-        name == "success" and "retrieval verified" in str(args)
-        for name, args, _kwargs in fake_st.calls
+
+def ready_status():
+    return knowledge_base.KnowledgeBaseStatus(
+        "faiss_ready", "faiss", "Ready", "fixture-index", retrieval_verified=True
     )
 
 
-def test_documentation_index_missing_and_failed_initialization_stay_explicit(monkeypatch):
-    from osguard.rag.knowledge_base import KnowledgeBaseStatus
-
-    failure = KnowledgeBaseStatus(
-        "initialization_failed", "unavailable", "Documentation initialization failed: offline",
-        "fixture-index", errors=("offline",),
-    )
-    _, fake_st = _load_app_with_fake_streamlit(
-        monkeypatch, button_returns={"Initialize documentation": True},
-        kb_initializer=lambda: failure,
-    )
-    assert any(name == "write" and "Initialization failed" in str(args) for name, args, _ in fake_st.calls)
-    assert any(name == "error" and "offline" in str(args) for name, args, _ in fake_st.calls)
-    assert any(name == "button" and args == ("Initialize documentation",) and not kwargs["disabled"]
-               for name, args, kwargs in fake_st.calls)
-
-
-def test_documentation_fallback_status_does_not_claim_faiss_ready(monkeypatch):
-    from osguard.rag.knowledge_base import KnowledgeBaseStatus
-
-    fallback = KnowledgeBaseStatus(
-        "fallback_active", "in_memory", "In-memory documentation fallback active.",
-        "fixture-index", retrieval_verified=True,
-    )
-    _, fake_st = _load_app_with_fake_streamlit(monkeypatch, kb_status=fallback)
-    labels = [str(args) for name, args, _ in fake_st.calls if name == "write"]
-    assert any("In-memory fallback active" in label for label in labels)
-    assert not any("FAISS ready" in label for label in labels)
-
-
-def _base_result(*, specialist_status, workflow_status, message):
+def result(*, completed=True):
     specialist = SpecialistName.DIAGNOSTIC
-    classification = SupervisorClassification(
-        intent=RequestIntent.DIAGNOSE,
-        problem_type=ProblemType.PERFORMANCE,
-        selected_specialists=[specialist],
-    )
     return {
-        "classification": classification,
-        "selected_specialists": [specialist],
-        "workflow_status": workflow_status,
-        "specialist_results": [
-            SpecialistResult(
-                specialist=specialist,
-                status=specialist_status,
-                message=message,
-            )
-        ],
-        "final_response": FinalResponse(
-            message="Workflow response",
-            workflow_status=workflow_status,
-            issue_category=ProblemType.PERFORMANCE,
+        "classification": SupervisorClassification(
+            intent=RequestIntent.DIAGNOSE, problem_type=ProblemType.MEMORY,
             selected_specialists=[specialist],
-            findings_available=specialist_status == "completed",
         ),
-    }
-
-
-def test_streamlit_ui_renders_successful_specialist_workflow(monkeypatch):
-    render_result, fake_st = _load_app_with_fake_streamlit(monkeypatch)
-    result = _base_result(
-        specialist_status="completed",
-        workflow_status="specialists_completed",
-        message="Diagnostic analysis completed using supplied text.",
-    )
-    result["diagnostic_symptoms"] = ["High CPU usage reported"]
-
-    render_result(result)
-
-    rendered = [(name, args) for name, args, _kwargs in fake_st.calls]
-    assert any(name == "info" and "completed" in str(args).casefold() for name, args in rendered)
-    assert any(name == "write" and "High CPU usage reported" in str(args) for name, args in rendered)
-    assert any(name == "write" and "Workflow response" in str(args) for name, args in rendered)
-    assert not any(name == "error" for name, _args in rendered)
-
-
-def test_streamlit_ui_renders_failed_specialist_and_error(monkeypatch):
-    render_result, fake_st = _load_app_with_fake_streamlit(monkeypatch)
-    result = _base_result(
-        specialist_status="failed",
-        workflow_status="specialist_failure",
-        message="The specialist could not complete its analysis.",
-    )
-    from osguard.schemas import WorkflowError
-
-    result["errors"] = [
-        WorkflowError(
-            stage="diagnostic_agent",
-            code="invalid_llm_output",
-            message="Diagnostic: invalid structured output.",
-        )
-    ]
-
-    render_result(result)
-
-    rendered = [(name, args) for name, args, _kwargs in fake_st.calls]
-    error_messages = [str(args) for name, args in rendered if name == "error"]
-    assert any("could not complete" in message.casefold() for message in error_messages)
-    assert any("invalid structured output" in message.casefold() for message in error_messages)
-    assert any(name == "caption" and "no verified findings" in str(args).casefold()
-               for name, args in rendered)
-
-
-def test_streamlit_ui_shows_read_only_environment_and_retrieval_failure(monkeypatch):
-    render_result, fake_st = _load_app_with_fake_streamlit(monkeypatch)
-    result = _base_result(
-        specialist_status="completed",
-        workflow_status="specialists_completed",
-        message="Evidence collection completed with limitations.",
-    )
-    result["available_environment"] = SystemEnvironment(
-        source="read_only_tool", os_name="Windows 11", os_version="10.0.22631",
-        os_build="22631", architecture="AMD64",
-    )
-    result["retrieval_result"] = RetrievalResult(
-        status="index_missing", query="cpu", backend="unavailable",
-        message="Build the local index first."
-    )
-    result["tool_results"] = [
-        ToolExecutionResult(
-            tool_name="get_process_stats", status="permission_denied",
-            summary="Process statistics could not be read.", error="AccessDenied",
-        )
-    ]
-
-    render_result(result)
-
-    rendered = [(name, args) for name, args, _kwargs in fake_st.calls]
-    assert any("observed by read-only tool" in str(args).casefold() for _name, args in rendered)
-    assert any("index missing" in str(args).casefold() for name, args in rendered if name == "warning")
-    assert any("retrieval unavailable" in str(args).casefold() for name, args in rendered if name == "write")
-    assert any("permission denied" in str(args).casefold() for _name, args in rendered)
-    assert not any(name == "markdown" and "Official source" in str(args) for name, args in rendered)
-
-
-def test_streamlit_ui_renders_retrieved_source_and_tool_measurement(monkeypatch):
-    render_result, fake_st = _load_app_with_fake_streamlit(monkeypatch)
-    result = _base_result(
-        specialist_status="completed",
-        workflow_status="specialists_completed",
-        message="Read-only evidence is available.",
-    )
-    evidence = RetrievedEvidence(
-        source_id="cpu-doc#part-1", title="CPU guidance",
-        source_url="https://learn.microsoft.com/cpu", os_version="Windows 11",
-        passage="A CPU sample does not establish a root cause.",
-        metadata={"relevance_score": 0.83},
-    )
-    result["retrieval_result"] = RetrievalResult(
-        status="success", query="cpu", backend="faiss", evidence=[evidence]
-    )
-    result["retrieved_evidence"] = [evidence]
-    result["tool_results"] = [
-        ToolExecutionResult(
-            tool_name="get_memory_info", status="success", summary="Memory sample",
-            evidence_id="tool:get_memory_info:fixture", data={"utilization_percent": 64.0},
-        )
-    ]
-
-    render_result(result)
-
-    rendered = [(name, args) for name, args, _kwargs in fake_st.calls]
-    assert any(name == "markdown" and "learn.microsoft.com/cpu" in str(args) for name, args in rendered)
-    assert any(name == "write" and "utilization_percent" in str(args) for name, args in rendered)
-    assert any(name == "caption" and "measured data" in str(args).casefold() for name, args in rendered)
-    assert any(name == "write" and "FAISS retrieval successful" in str(args) for name, args in rendered)
-
-
-def test_streamlit_ui_shows_memory_process_table_and_raw_result(monkeypatch):
-    render_result, fake_st = _load_app_with_fake_streamlit(monkeypatch)
-    result = _base_result(
-        specialist_status="completed", workflow_status="specialists_completed",
-        message="The measured memory snapshot is available.",
-    )
-    result["tool_results"] = [
-        ToolExecutionResult(
-            tool_name="get_memory_info", status="success", summary="Memory snapshot",
-            evidence_id="tool:get_memory_info:fixture",
-            data={"total_bytes": 1000, "used_bytes": 600, "available_bytes": 400,
-                  "utilization_percent": 60.0},
-        ),
-        ToolExecutionResult(
-            tool_name="get_process_stats", status="success", summary="Process snapshot",
-            evidence_id="tool:get_process_stats:fixture",
-            data={"sort_by": "memory", "memory_metric_definition": "Working set is not additive.",
-                  "processes": [{"name": "fixture.exe", "pid": 4, "memory_bytes": 512,
-                                 "memory_mib": 0.0, "cpu_percent": None}]},
-        ),
-    ]
-    render_result(result)
-    assert any(name == "dataframe" and args[0][0]["Process"] == "fixture.exe"
-               for name, args, _ in fake_st.calls)
-    assert any(name == "write" and "400 bytes available" in str(args)
-               for name, args, _ in fake_st.calls)
-    assert any(name == "expander" and "Raw read-only Windows checks" in str(args)
-               for name, args, _ in fake_st.calls)
-
-
-def test_streamlit_ui_reports_in_memory_fallback_without_claiming_faiss(monkeypatch):
-    render_result, fake_st = _load_app_with_fake_streamlit(monkeypatch)
-    result = _base_result(
-        specialist_status="completed", workflow_status="specialists_completed",
-        message="Evidence collection completed.",
-    )
-    result["retrieval_result"] = RetrievalResult(
-        status="no_results", query="cpu", backend="in_memory",
-        message="No matching passages were found.",
-    )
-    render_result(result)
-    written = [str(args) for name, args, _kwargs in fake_st.calls if name == "write"]
-    assert any("In-memory fallback active" in item for item in written)
-    assert not any("FAISS available" in item for item in written)
-
-
-def test_streamlit_ui_displays_ieee_checks_sources_and_no_execution_controls(monkeypatch):
-    render_result, fake_st = _load_app_with_fake_streamlit(monkeypatch)
-    result = _base_result(
-        specialist_status="completed",
-        workflow_status="specialists_completed",
-        message="IEEE recommendation review: 1 supported, 0 unsupported, 0 uncertain.",
-    )
-    action = ProposedCorrectiveAction(
-        action_id="act-0123456789abcdef",
-        description="Install or update Runtime to documented required version 2.0.",
-        intended_purpose="Resolve the documented Runtime mismatch.",
-        target_subsystem=OSSubsystem.SOFTWARE_DEPENDENCIES,
-        operation="install_or_update_dependency",
-        parameters={"component": "Runtime", "required_version": "2.0"},
-        rationale="The user-reported installed version is below the documented requirement.",
-        evidence_ids=["doc#chunk-1"],
-        evidence_quotes={"doc#chunk-1": "Runtime 2.0 is required for Windows 11."},
-        required_environment_conditions=["Windows 11"],
-        potential_effects=["Changes installed software."],
-        risks=["May affect applications using this runtime."],
-        requires_administrator="unknown",
-        risk="high",
-    )
-    check = VerificationCheck(
-        result="pass", rationale="The cited documented requirement supports the target version.",
-        evidence_ids=["doc#chunk-1"],
-    )
-    verification = IEEEVerificationResult(
-        action_id=action.action_id,
-        intent=check,
-        environment=check.model_copy(update={"result": "unknown", "rationale": "Admin requirement unknown."}),
-        evidence=check,
-        effect=check,
-        overall="uncertain",
-        risk="high",
-        reason_codes=["environment_prerequisite_unknown"],
-        supporting_evidence_ids=["doc#chunk-1"],
-        missing_information=["Confirm administrator requirements."],
-        explanation="This is a recommendation only.",
-    )
-    result.update({
-        "proposed_corrective_actions": [action],
-        "ieee_verification_results": [verification],
-        "ieee_verification_summary": IEEEVerificationSummary(
-            status="completed", message="One result recorded.", result_count=1
-        ),
-    })
-
-    render_result(result)
-
-    rendered = [(name, args) for name, args, _kwargs in fake_st.calls]
-    assert any(name == "subheader" and "IEEE verification" in str(args) for name, args in rendered)
-    assert any(name == "warning" and "uncertain" in str(args).casefold() for name, args in rendered)
-    assert any(name == "write" and "Runtime 2.0 is required" in str(args) for name, args in rendered)
-    assert any(name == "warning" and "administrator requirements" in str(args).casefold() for name, args in rendered)
-    button_labels = [str(args).casefold() for name, args in rendered if name == "button"]
-    assert not any("approve" in label or "execute" in label or "repair" in label for label in button_labels)
-
-
-def _phase5_ui_result():
-    snapshot = DemoCacheSnapshot(
-        target="C:/project/data/demo_app/cache",
-        payload_size=64,
-        payload_sha256="a" * 64,
-        owner_marker_sha256="b" * 64,
-    )
-    plan = RepairPlan(
-        plan_id="plan-" + "1" * 32,
-        action_id="act-" + "2" * 16,
-        executable_action_id="CLEAR_OSGUARD_DEMO_CACHE",
-        target=snapshot.target,
-        parameters={"cache_id": "osguard_demo"},
-        intended_outcome="The disposable cache is empty.",
-        expected_effects=["The known cache entry is cleared."],
-        potential_risks=["Disposable demo data is discarded."],
-        preconditions=["The marker and known payload are present."],
-        validator_id="demo_cache_empty_and_owned",
-        pre_state=snapshot,
-        fingerprint="f" * 64,
-    )
-    return {
-        "repair_plan": plan,
-        "repair_eligibility": RepairEligibility(
-            status="eligible", action_id=plan.action_id, plan_id=plan.plan_id,
-        ),
-        "repair_eligibility_results": [RepairEligibility(
-            status="eligible", action_id=plan.action_id, plan_id=plan.plan_id,
+        "selected_specialists": [specialist],
+        "workflow_status": "specialists_completed" if completed else "specialist_failure",
+        "specialist_results": [SpecialistResult(
+            specialist=specialist, status="completed" if completed else "failed",
+            message="Analysis complete" if completed else "Analysis unavailable",
         )],
-        "approval_state": ApprovalState(
-            status="pending", action_id=plan.action_id, plan_id=plan.plan_id,
-            fingerprint=plan.fingerprint,
+        "final_response": FinalResponse(
+            message="Classified as memory. Selected specialists: diagnostic.",
+            workflow_status="specialists_completed" if completed else "specialist_failure",
+            issue_category=ProblemType.MEMORY,
+            selected_specialists=[specialist], findings_available=completed,
         ),
-        "execution_result": ExecutionValidationResult(),
-        "validation_result": PostRepairValidationResult(),
-        "workflow_status": "awaiting_approval",
     }
 
 
-def test_phase5_ui_shows_exact_plan_and_approval_only_when_pending(monkeypatch):
-    render, fake_st = _load_app_with_fake_streamlit(monkeypatch)
-    controls = render.__globals__["_render_approval_controls"]
-    result = _phase5_ui_result()
-    fake_st.session_state["osguard_pending_thread_id"] = "ui-thread"
-
-    render(result)
-    controls(result)
-
-    rendered = [(name, args) for name, args, _kwargs in fake_st.calls]
-    assert any(name == "write" and "CLEAR_OSGUARD_DEMO_CACHE" in str(args) for name, args in rendered)
-    assert any(name == "write" and "C:/project/data/demo_app/cache" in str(args) for name, args in rendered)
-    assert any(name == "button" and args == ("APPROVE",) for name, args in rendered)
-    assert any(name == "button" and args == ("DECLINE",) for name, args in rendered)
-
-    fake_st.calls.clear()
-    ineligible = {**result, "repair_eligibility": RepairEligibility(status="ineligible")}
-    controls(ineligible)
-    assert not any(name == "button" for name, _args, _kwargs in fake_st.calls)
+def tool(name, data, *, status="success"):
+    return ToolExecutionResult(
+        tool_name=name, status=status, summary="Measured local data.", data=data,
+        evidence_id=f"tool:{name}:fixture" if status == "success" else None,
+    )
 
 
-def test_phase5_ui_consumes_resume_cursor_and_does_not_repeat_on_rerun(monkeypatch):
-    render, fake_st = _load_app_with_fake_streamlit(monkeypatch)
-    controls = render.__globals__["_render_approval_controls"]
-    result = _phase5_ui_result()
-    fake_st.session_state["osguard_pending_thread_id"] = "ui-thread"
-    fake_st.button_returns["APPROVE"] = True
+def test_home_navigation_and_draft_are_stable(ui, monkeypatch):
+    monkeypatch.setattr(frontend, "_knowledge_status", ready_status)
+    frontend.main()
+    assert "Intelligent Windows Troubleshooting" in ui.visible()
+    assert "Analyze Issue" in ui.visible()
+    assert all(page in ui.visible() for page in frontend.PAGES)
+    ui.session_state["osguard_draft"] = "My RAM is full"
+    ui.session_state["osguard_issue_input"] = "My RAM is full"
+    ui.session_state["osguard_page"] = "Troubleshoot"
+    ui.calls.clear()
+    frontend.main()
+    assert ui.session_state["osguard_draft"] == "My RAM is full"
+    assert "My RAM is full" in ui.visible()
+    ui.session_state["osguard_page"] = "Results"
+    ui.calls.clear()
+    frontend.main()
+    assert "No analysis is available yet" in ui.visible()
+
+
+def test_shortcut_populates_input_without_running_analysis(ui, monkeypatch):
+    monkeypatch.setattr(frontend, "_knowledge_status", ready_status)
+    ui.button_returns["Networking"] = True
+    frontend.main()
+    assert "Wi-Fi" in ui.session_state["osguard_draft"]
+    assert "osguard_supervisor_result" not in ui.session_state
+    ui.calls.clear()
+    frontend.main()
+    assert ui.session_state["osguard_issue_input"] == ui.session_state["osguard_draft"]
+
+
+def test_graph_runs_once_and_results_survive_navigation(ui, monkeypatch):
+    monkeypatch.setattr(frontend, "_knowledge_status", ready_status)
     calls = []
-    completed = {
-        **result,
-        "approval_state": result["approval_state"].model_copy(update={"status": "approved"}),
-        "execution_result": ExecutionValidationResult(status="succeeded"),
-        "validation_result": PostRepairValidationResult(status="resolved", details="Fixture empty."),
-    }
-
-    class _Workflow:
-        def invoke(self, command, config):
-            calls.append((command.resume, config))
-            return completed
-
-    render.__globals__["_get_supervisor_graph"] = lambda: _Workflow()
-    controls(result)
-    assert len(calls) == 1, [(name, args) for name, args, _ in fake_st.calls if name in {"error", "button"}]
-    assert calls[0][0] == {
-        "decision": "approve",
-        "plan_id": result["repair_plan"].plan_id,
-        "fingerprint": result["repair_plan"].fingerprint,
-    }
-    assert "osguard_pending_thread_id" not in fake_st.session_state
-    controls(fake_st.session_state["osguard_supervisor_result"])
+    class Workflow:
+        def invoke(self, state, config):
+            calls.append((state, config))
+            return result()
+    monkeypatch.setattr(frontend, "_get_supervisor_graph", lambda: Workflow())
+    ui.input_value = "Why is my RAM full?"
+    ui.button_returns["Analyze Issue"] = True
+    frontend.main()
     assert len(calls) == 1
+    assert ui.session_state["osguard_next_page"] == "Results"
+    ui.input_value = None
+    ui.calls.clear()
+    frontend.main()
+    assert "Your analysis" in ui.visible()
+    ui.session_state["osguard_page"] = "Knowledge Base"
+    frontend.main()
+    assert len(calls) == 1
+    assert ui.session_state["osguard_draft"] == "Why is my RAM full?"
 
-    render(completed)
-    assert any(name == "success" and "Resolved" in str(args) for name, args, _kwargs in fake_st.calls)
 
+def test_result_uses_real_ram_values_and_hides_internal_names(ui):
+    state = result()
+    state["tool_results"] = [
+        tool("get_memory_info", {"total_bytes": 16 * 1024**3,
+                                 "used_bytes": 8 * 1024**3,
+                                 "available_bytes": 8 * 1024**3,
+                                 "utilization_percent": 50.0}),
+        tool("get_process_stats", {"system_cpu_percent": 12.0,
+                                   "processes": [{"name": "editor.exe", "pid": 1,
+                                                  "cpu_percent": 4.0, "memory_mib": 128.0}]}),
+    ]
+    state["diagnostic_observations"] = [DiagnosticObservation(
+        description="Physical memory is 50% utilized.", source="read_only_tool",
+        tool_name="get_memory_info", evidence_ids=["tool:get_memory_info:fixture"],
+    )]
+    state["safe_diagnostic_steps"] = ["Close an application you no longer need."]
+    frontend._render_supervisor_result(state)
+    visible = ui.visible()
+    assert "Main finding" in visible and "Physical memory is 50% utilized" in visible
+    assert "8.0 GiB" in visible and "12.0%" in visible
+    assert "editor.exe" in visible and "Close an application" in visible
+    assert "get_memory_info" not in visible and "tool:get_" not in visible
+    assert "Selected specialists" not in visible
+
+
+def test_components_and_sources_follow_actual_result(ui):
+    state = result()
+    source = "https://learn.microsoft.com/en-us/windows/test"
+    passages = [RetrievedEvidence(source_id=f"doc#{n}", title="Memory guidance",
+                                  source_url=source, passage=f"Passage {n}",
+                                  metadata={"section": "Overview"}) for n in (1, 2)]
+    state["retrieval_result"] = RetrievalResult(status="success", query="memory",
+                                                backend="faiss", evidence=passages)
+    state["tool_results"] = [tool("get_memory_info", {"utilization_percent": 50})]
+    frontend._render_supervisor_result(state)
+    visible = ui.visible()
+    assert visible.count("Read on Microsoft Learn") == 1
+    assert "2 supporting passages" in visible
+    assert "Windows System Analysis" in visible and "Microsoft Knowledge Base" in visible
+    assert "Completed" in visible
+    ui.calls.clear()
+    state["retrieval_result"] = RetrievalResult(status="retrieval_error", query="memory",
+                                                backend="unavailable")
+    state["tool_results"] = [tool("get_memory_info", {}, status="failed")]
+    frontend._render_supervisor_result(state)
+    visible = ui.visible()
+    assert "Microsoft documentation is temporarily unavailable" in visible
+    assert "Read on Microsoft Learn" not in visible
+    assert "Unavailable" in visible
+
+
+def test_failed_workflow_does_not_claim_completion(ui):
+    frontend._render_supervisor_result(result(completed=False))
+    visible = ui.visible()
+    assert "Analysis incomplete" in visible
+    assert "Analysis complete" not in visible
+    assert "No confirmed finding" in visible
+
+
+def test_command_review_omits_raw_command_text(ui):
+    state = result()
+    state["command_verification_findings"] = [CommandVerificationFinding(
+        command_text="Get-Process | Stop-Process", risk="high",
+        explanation="Do not run Get-Process | Stop-Process.", verified=False,
+    )]
+    state["safe_diagnostic_steps"] = ["Run Get-Process to inspect the host."]
+    frontend._render_supervisor_result(state)
+    visible = ui.visible()
+    assert "Command review" in visible and "Risk: High" in visible
+    assert "Get-Process" not in visible and "Stop-Process" not in visible
+
+
+def test_existing_knowledge_index_reused_and_missing_index_built_once(ui, monkeypatch):
+    calls = []
+    monkeypatch.setattr(knowledge_base, "inspect_knowledge_base", lambda: calls.append("inspect") or ready_status())
+    monkeypatch.setattr(knowledge_base, "initialize_knowledge_base", lambda: calls.append("initialize") or ready_status())
+    frontend.main()
+    frontend.main()
+    assert calls == ["inspect"]
+    ui.session_state.clear()
+    missing = knowledge_base.KnowledgeBaseStatus("index_missing", "unavailable", "Missing", "fixture")
+    monkeypatch.setattr(knowledge_base, "inspect_knowledge_base", lambda: calls.append("missing") or missing)
+    frontend.main()
+    frontend.main()
+    assert calls[-2:] == ["missing", "initialize"]
+
+
+def test_failed_indexing_is_reported_and_retried_only_on_click(ui, monkeypatch):
+    calls = []
+    missing = knowledge_base.KnowledgeBaseStatus("index_missing", "unavailable", "Missing", "fixture")
+    failed = knowledge_base.KnowledgeBaseStatus("initialization_failed", "unavailable", "Offline", "fixture")
+    monkeypatch.setattr(knowledge_base, "inspect_knowledge_base", lambda: missing)
+    monkeypatch.setattr(knowledge_base, "initialize_knowledge_base", lambda: calls.append(1) or failed)
+    frontend.main()
+    assert len(calls) == 1
+    ui.session_state["osguard_page"] = "Knowledge Base"
+    ui.calls.clear()
+    frontend.main()
+    assert len(calls) == 1 and "temporarily unavailable" in ui.visible()
+    ui.button_returns["Retry documentation preparation"] = True
+    frontend.main()
+    assert len(calls) == 2
+
+
+def pending_state():
+    snapshot = DemoCacheSnapshot(target="C:/project/data/demo_app/cache", payload_size=64,
+                                 payload_sha256="a" * 64, owner_marker_sha256="b" * 64)
+    plan = RepairPlan(
+        plan_id="plan-" + "1" * 32, action_id="act-" + "2" * 16,
+        executable_action_id="CLEAR_OSGUARD_DEMO_CACHE", target=snapshot.target,
+        parameters={"cache_id": "osguard_demo"}, intended_outcome="Owned cache empty",
+        expected_effects=["Known entry cleared"], potential_risks=["Owned temporary data is discarded"],
+        preconditions=["Known entry present"], validator_id="demo_cache_empty_and_owned",
+        pre_state=snapshot, fingerprint="f" * 64,
+    )
+    state = result()
+    state.update({
+        "repair_plan": plan,
+        "repair_eligibility": RepairEligibility(status="eligible", action_id=plan.action_id,
+                                                 plan_id=plan.plan_id),
+        "approval_state": ApprovalState(status="pending", action_id=plan.action_id,
+                                        plan_id=plan.plan_id, fingerprint=plan.fingerprint),
+        "workflow_status": "awaiting_approval",
+    })
+    return state
+
+
+@pytest.mark.parametrize("button,decision", [("Approve", "approve"), ("Decline", "decline")])
+def test_exact_approval_resume_once_and_no_automatic_change(ui, monkeypatch, button, decision):
+    state = pending_state()
+    ui.session_state["osguard_pending_thread_id"] = "thread-1"
+    commands = []
+    class Workflow:
+        def invoke(self, command, config):
+            commands.append((command.resume, config))
+            finished = {**state, "approval_state": state["approval_state"].model_copy(
+                update={"status": "approved" if decision == "approve" else "declined"})}
+            return finished
+    monkeypatch.setattr(frontend, "_get_supervisor_graph", lambda: Workflow())
+    frontend._render_approval_controls(state)
+    assert not commands
+    assert "Approval Required" in ui.visible()
+    assert "OSGuard Workspace Cleanup" in ui.visible()
+    assert "CLEAR_OSGUARD_DEMO_CACHE" not in ui.visible()
+    ui.button_returns[button] = True
+    frontend._render_approval_controls(state)
+    assert len(commands) == 1
+    assert commands[0][0] == {"decision": decision, "plan_id": state["repair_plan"].plan_id,
+                              "fingerprint": state["repair_plan"].fingerprint}
+    frontend._render_approval_controls(state)
+    assert len(commands) == 1
+
+
+def test_ineligible_plan_has_no_approval_and_cleanup_not_prepared_automatically(ui, monkeypatch):
+    state = pending_state()
+    state["repair_eligibility"] = RepairEligibility(status="ineligible")
+    ui.session_state["osguard_pending_thread_id"] = "thread-1"
+    frontend._render_approval_controls(state)
+    assert not any(name == "button" for name, _, _ in ui.calls)
+    monkeypatch.setattr(frontend, "_knowledge_status", ready_status)
+    ui.session_state["osguard_page"] = "Settings"
+    frontend.main()
+    assert "Workspace Maintenance" in ui.visible()
+    assert "Prepare workspace files" in ui.visible()
+    assert "Review workspace cleanup" in ui.visible()
+
+
+def test_resolved_cleanup_only_shows_confirmed_completion(ui):
+    state = pending_state()
+    state["approval_state"] = ApprovalState(status="approved")
+    state["execution_result"] = ExecutionValidationResult(status="succeeded")
+    state["validation_result"] = PostRepairValidationResult(status="resolved", details="Fresh check complete")
+    frontend._render_supervisor_result(state)
+    assert "confirmed by a fresh check" in ui.visible()
+    assert not any(name == "button" and args[0] == "Approve" for name, args, _ in ui.calls)

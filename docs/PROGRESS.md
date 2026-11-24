@@ -1,5 +1,58 @@
 # OSGuard AI Progress
 
+## Streamlit frontend redesign — 2026-11-24
+
+**Status:** The presentation layer now provides Home, Troubleshoot, Results,
+Knowledge Base, and Settings views. The existing LangGraph, Groq, MCP, RAG,
+IEEE, and approval/repair implementations were preserved. No corrective action
+is run from a diagnostic request without the existing exact-plan approval flow.
+
+### Implemented
+
+- Replaced the technical Streamlit page with a dark, responsive interface and
+  a cached graph/checkpointer. Navigation preserves the current request and
+  result without submitting the graph again.
+- Results show the actual issue category, selected specialists, workflow
+  status, observed Windows measurements, grounded findings, uncertainty,
+  guidance, component summaries, and grouped Microsoft sources. Technical
+  identifiers and raw command syntax are omitted from the primary report.
+- Documentation readiness is checked once per session. Missing or unusable
+  indexes use the existing initialization path; an already verified index is
+  reused. The page reports availability without claiming retrieval when it
+  failed, and offers an explicit retry after failure.
+- The approval view presents the scoped workspace operation and retains the
+  pending LangGraph thread. Approval and decline resume the same checkpoint;
+  approval carries the exact plan ID and fingerprint. Workspace preparation
+  remains an explicit Settings action.
+
+### Files modified
+
+`app.py`, `src/osguard/frontend.py`, `tests/test_app_ui.py`,
+`tests/test_frontend_streamlit.py`, `README.md`, `ERRORS.md`, and this file.
+Backend agent, retrieval, MCP, IEEE, and repair modules were not changed.
+
+### Verification already completed
+
+- Focused UI and Phase 5 checks: **48 passed, 1 skipped**. The skip requires
+  Windows symlink privilege. The run emitted 17 LangSmith deprecation warnings.
+- Streamlit `AppTest` checks for Home/input/navigation and approval/decline:
+  **3 passed** across focused runs. These use fixture graph states; they do not
+  call Groq or perform a repair.
+- Python compilation of `app.py` and `src/osguard/frontend.py` passed before
+  a final small display-only edit. The Streamlit server started and returned
+  HTTP 200 for `/` and `/_stcore/health` on localhost. This confirms startup,
+  not visual browser behavior or a live diagnostic result.
+- A complete pytest suite and live Groq/RAM diagnostic were not run for this
+  frontend task. The user requested fewer tests and implementation priority.
+  The final display-only edit has not been rerun through tests.
+
+### Remaining limits
+
+The real browser layout and live Groq-to-Windows diagnosis still need a manual
+presentation check. The workspace cleanup is limited to OSGuard-owned files.
+Documentation availability depends on the existing local index and environment.
+No backend capability was added in this frontend milestone.
+
 ## Expanded Windows diagnostics through local MCP — 2026-11-22
 
 **Status:** The existing LangGraph collector and local MCP server now expose
