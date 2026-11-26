@@ -75,6 +75,7 @@ class FakeStreamlit:
 def ui(monkeypatch):
     fake = FakeStreamlit()
     monkeypatch.setattr(frontend, "st", fake)
+    monkeypatch.setattr(frontend, "_prepare_workspace_once", lambda: None)
     return fake
 
 
@@ -319,7 +320,7 @@ def test_exact_approval_resume_once_and_no_automatic_change(ui, monkeypatch, but
     assert len(commands) == 1
 
 
-def test_ineligible_plan_has_no_approval_and_cleanup_not_prepared_automatically(ui, monkeypatch):
+def test_ineligible_plan_has_no_approval_or_manual_preparation(ui, monkeypatch):
     state = pending_state()
     state["repair_eligibility"] = RepairEligibility(status="ineligible")
     ui.session_state["osguard_pending_thread_id"] = "thread-1"
@@ -329,7 +330,7 @@ def test_ineligible_plan_has_no_approval_and_cleanup_not_prepared_automatically(
     ui.session_state["osguard_page"] = "Settings"
     frontend.main()
     assert "Workspace Maintenance" in ui.visible()
-    assert "Prepare workspace files" in ui.visible()
+    assert "Prepare workspace files" not in ui.visible()
     assert "Review workspace cleanup" in ui.visible()
 
 

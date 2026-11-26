@@ -11,6 +11,11 @@ from osguard.schemas import DiagnosticObservation, ToolExecutionResult
 from test_app_ui import pending_state, result
 
 
+@pytest.fixture(autouse=True)
+def no_real_workspace_preparation(monkeypatch):
+    monkeypatch.setattr(frontend, "_prepare_workspace_once", lambda: None)
+
+
 def test_streamlit_home_input_ram_result_and_navigation(monkeypatch):
     ready = knowledge_base.KnowledgeBaseStatus(
         "faiss_ready", "faiss", "Ready", "fixture-index", retrieval_verified=True

@@ -23,6 +23,27 @@ CSS = """
   :root { color-scheme: dark; }
   .stApp, [data-testid="stAppViewContainer"] { background: #0B1120; color: #F8FAFC; }
   [data-testid="stSidebar"] { background: #111A2E; border-right: 1px solid #293850; }
+  .stApp p, .stApp span, .stApp label, .stApp li,
+  .stApp [data-testid="stMarkdownContainer"],
+  [data-testid="stSidebar"] p, [data-testid="stSidebar"] span,
+  [data-testid="stSidebar"] label { color: #FFFFFF !important; }
+  .stApp [data-testid="stCaptionContainer"] *, .osg-muted { color: #E2E8F0 !important; }
+  .stApp [data-testid="stButton"] button,
+  .stApp .stButton button { background-color: #1E293B !important;
+      color: #FFFFFF !important; border: 1px solid #64748B !important; }
+  .stApp [data-testid="stButton"] button *, .stApp .stButton button * {
+      color: #FFFFFF !important; }
+  .stApp [data-testid="stButton"] button:hover,
+  .stApp .stButton button:hover { background-color: #334155 !important; }
+  .stApp [data-testid="stButton"] button:disabled,
+  .stApp .stButton button:disabled { background-color: #1E293B !important;
+      color: #CBD5E1 !important; }
+  .stApp [data-testid="stAlert"], .stApp [data-baseweb="notification"] {
+      background-color: #172238 !important; color: #FFFFFF !important; }
+  .stApp [data-testid="stAlert"] > div,
+  .stApp [data-baseweb="notification"] > div { background-color: #172238 !important; }
+  .stApp [data-testid="stAlert"] *, .stApp [data-baseweb="notification"] * {
+      color: #FFFFFF !important; }
   [data-testid="stHeader"] { background: transparent; }
   .block-container { max-width: 1220px; padding-top: 1.8rem; padding-bottom: 2.5rem; }
   h1, h2, h3 { color: #F8FAFC !important; letter-spacing: -.025em; }
@@ -35,11 +56,14 @@ CSS = """
   [data-testid="stMetric"] { background: #172238; border: 1px solid #2D405B;
       border-radius: 14px; padding: 12px 14px; }
   [data-testid="stMetricValue"] { color: #F8FAFC; font-size: 1.5rem; }
-  [data-testid="stMetricLabel"] { color: #CBD5E1; }
+  [data-testid="stMetricLabel"] { color: #FFFFFF; }
   [data-testid="stTextArea"] textarea { background: #111A2E; color: #F8FAFC;
       border: 1px solid #405270; border-radius: 11px; }
+  [data-testid="stTextArea"] textarea::placeholder { color: #E2E8F0; opacity: 1; }
   .stButton > button { min-height: 2.6rem; border-radius: 10px; }
-  .stButton > button[kind="primary"] { background: #3B82F6; border: 0; font-weight: 650; }
+  .stApp [data-testid="stButton"] button[kind="primary"],
+  .stApp .stButton button[kind="primary"] { background-color: #1D4ED8 !important;
+      color: #FFFFFF !important; border: 0 !important; font-weight: 650; }
   .osg-kicker { color: #38BDF8; font-weight: 700; letter-spacing: .1em;
       text-transform: uppercase; font-size: .76rem; }
   .osg-brand { color: #F8FAFC; font-size: 1.35rem; font-weight: 800; }
@@ -132,10 +156,28 @@ def _finding(result: dict) -> str:
     classification = result.get("classification")
     if classification and classification.needs_clarification:
         return _public(classification.clarification_question or "Please describe the main symptom.")
-    measured = next((item for item in result.get("diagnostic_observations", [])
-                     if item.source == "read_only_tool"), None)
-    if measured:
-        return _public(measured.description)
+    response = result.get("final_response")
+    if response and response.findings_available:
+        direct = response.message.split("Classified as", 1)[0].strip()
+        if (direct and not direct.startswith("Reported problem:")
+                and not re.fullmatch(r"(?:RAM|memory) (?:utilization|usage):\s*\d+(?:\.\d+)?%[.!?]?", direct, re.I)):
+            return _public(direct)
+    request = str(result.get("user_request") or "").casefold()
+    processes = _tool(result, "get_process_stats")
+    if processes and any(phrase in request for phrase in ("most ram", "most memory", "top process")):
+        rows = processes.data.get("processes", [])
+        if processes.data.get("sort_by") == "memory" and rows:
+            top = rows[0]
+            if top.get("name") and top.get("memory_mib") is not None:
+                scope = "inspected" if processes.data.get("process_scan_cap_reached") else "accessible"
+                return (f"Among {scope} processes, {top['name']} had the largest measured working set "
+                        f"({top['memory_mib']:,.1f} MiB). This snapshot does not show total usage by application.")
+    memory = _tool(result, "get_memory_info")
+    if memory and memory.data.get("utilization_percent") is not None:
+        available = memory.data.get("available_bytes")
+        remaining = f", with {_bytes(available)} available" if available is not None else ""
+        return (f"Windows reported {memory.data['utilization_percent']}% memory utilization{remaining}. "
+                "This snapshot alone does not establish the cause or a memory trend.")
     commands = result.get("command_verification_findings", [])
     if commands:
         return (f"Submitted command review: {_label(commands[0].risk).lower()} risk; "
@@ -144,11 +186,6 @@ def _finding(result: dict) -> str:
     if compatibility:
         item = compatibility[0]
         return f"{item.component}: {_label(item.result)} based on the available information."
-    response = result.get("final_response")
-    if response:
-        direct = response.message.split("Classified as", 1)[0].strip()
-        if direct and not direct.startswith("Reported problem:"):
-            return _public(direct)
     return "No confirmed system finding is available yet."
 
 
@@ -235,10 +272,12 @@ def _tables(result: dict) -> None:
             st.caption("Only the available portion of this inventory is shown.")
 
 
-def _findings(result: dict) -> None:
+def _findings(result: dict, main_finding: str = "") -> None:
     observations = result.get("diagnostic_observations", [])
-    measured = _unique([_public(item.description) for item in observations if item.source == "read_only_tool"])
-    reported = _unique([_public(item.description) for item in observations if item.source != "read_only_tool"])
+    measured = _unique([_public(item.description) for item in observations
+                        if item.source == "read_only_tool" and _public(item.description) != main_finding])
+    reported = _unique([_public(item.description) for item in observations
+                        if item.source != "read_only_tool" and _public(item.description) != main_finding])
     if measured or reported:
         st.subheader("What we found")
         for line in measured[:6]:
@@ -348,9 +387,20 @@ def _store_graph_result(workflow, result: dict, thread_id: str) -> None:
         config = {"configurable": {"thread_id": thread_id}}
         st.session_state["osguard_supervisor_result"] = dict(workflow.get_state(config).values)
         st.session_state["osguard_pending_thread_id"] = thread_id
+        st.session_state["osguard_workspace_status"] = "pending"
     else:
         st.session_state["osguard_supervisor_result"] = result
         st.session_state.pop("osguard_pending_thread_id", None)
+        validation = result.get("validation_result")
+        if validation and validation.status == "resolved":
+            st.session_state["osguard_workspace_status"] = "completed"
+        elif st.session_state.get("osguard_workspace_status") == "pending":
+            try:
+                from osguard.repair.demo_cache import DemoCacheStore
+
+                st.session_state["osguard_workspace_status"] = DemoCacheStore().inspect().status
+            except Exception:
+                st.session_state["osguard_workspace_status"] = "failed"
 
 
 def _render_approval_controls(result: dict) -> None:
@@ -410,7 +460,8 @@ def _render_supervisor_result(result: dict) -> None:
     st.caption("Issue category: " + (_label(classification.problem_type) if classification else "Not determined"))
     with st.container(border=True):
         st.markdown('<div class="osg-kicker">Main finding</div>', unsafe_allow_html=True)
-        st.markdown("### " + _finding(result))
+        main_finding = _finding(result)
+        st.markdown("### " + main_finding)
     response = result.get("final_response")
     if response and not response.findings_available:
         st.caption("No confirmed finding was produced from the available information.")
@@ -418,7 +469,7 @@ def _render_supervisor_result(result: dict) -> None:
         st.info("Revise the issue description and try again from Troubleshoot.")
     _metric_cards(result)
     _tables(result)
-    _findings(result)
+    _findings(result, main_finding)
     _components(result)
     _sources(result)
     approval = result.get("approval_state")
@@ -548,6 +599,34 @@ def _knowledge_page() -> None:
         st.caption("Sources used in your analysis will appear here after an issue is reviewed.")
 
 
+def _prepare_workspace_once() -> None:
+    """Prepare only a safely missing owned workspace, once per UI session."""
+    if st.session_state.get("osguard_workspace_checked"):
+        return
+    st.session_state["osguard_workspace_checked"] = True
+    result = st.session_state.get("osguard_supervisor_result") or {}
+    validation = result.get("validation_result")
+    approval = result.get("approval_state")
+    if (st.session_state.get("osguard_workspace_status") == "completed"
+            or (validation and validation.status == "resolved")):
+        st.session_state["osguard_workspace_status"] = "completed"
+        return
+    pending = bool(st.session_state.get("osguard_pending_thread_id")
+                   or (approval and approval.status == "pending"))
+    try:
+        from osguard.repair.demo_cache import DemoCacheStore
+
+        store = DemoCacheStore()
+        inspection = store.inspect()
+        if inspection.status == "missing" and not pending:
+            inspection = store.prepare_fixture()
+        st.session_state["osguard_workspace_status"] = (
+            "pending" if pending else inspection.status
+        )
+    except Exception:
+        st.session_state["osguard_workspace_status"] = "failed"
+
+
 def _settings() -> None:
     st.title("Settings & availability")
     result = st.session_state.get("osguard_supervisor_result")
@@ -581,21 +660,17 @@ def _settings() -> None:
         from osguard.repair.demo_cache import DemoCacheStore
 
         st.session_state["osguard_workspace_status"] = DemoCacheStore().inspect().status
-    if st.session_state.get("osguard_workspace_status"):
-        st.write("Workspace files: " + _label(st.session_state["osguard_workspace_status"]))
-    validation = result.get("validation_result") if result else None
-    cleared = bool(validation and validation.status == "resolved")
-    if st.button("Prepare workspace files", disabled=cleared):
-        from osguard.repair.demo_cache import DemoCacheStore
-
-        inspection = DemoCacheStore().prepare_fixture()
-        st.session_state["osguard_workspace_status"] = inspection.status
-        (st.success if inspection.status == "ready" else st.error)(
-            "OSGuard workspace files are ready." if inspection.status == "ready"
-            else "Workspace files could not be prepared safely."
-        )
-    if cleared:
-        st.caption("The latest approved cleanup has completed. Workspace files will not be recreated in this session.")
+    workspace_status = st.session_state.get("osguard_workspace_status")
+    if workspace_status == "ready":
+        st.write("OSGuard Temporary Files: Ready")
+    elif workspace_status == "pending":
+        st.write("OSGuard Temporary Files: Cleanup awaiting your decision")
+    elif workspace_status in {"completed", "empty"}:
+        st.caption("OSGuard Temporary Files are cleared and will not be recreated in this session.")
+    elif workspace_status in {"unsafe", "failed", "unsupported_os"}:
+        st.warning("OSGuard Temporary Files could not be prepared safely.")
+    elif workspace_status == "missing":
+        st.caption("OSGuard Temporary Files are not prepared.")
     if st.button("Review workspace cleanup"):
         # The backend recognizes this fixed request; it still enforces IEEE and approval.
         _run_analysis("Clear the OSGuard demo cache")
@@ -626,6 +701,7 @@ def main() -> None:
     st.markdown(CSS, unsafe_allow_html=True)
     if "osguard_next_input" in st.session_state:
         st.session_state["osguard_issue_input"] = st.session_state.pop("osguard_next_input")
+    _prepare_workspace_once()
     _knowledge_status()
     page = _sidebar()
     if page == "Home":
